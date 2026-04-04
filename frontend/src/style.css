@@ -1,0 +1,140 @@
+:root {
+  --page-bg: #f4f0e7;
+  --page-bg-strong: #efe2c4;
+  --surface: rgba(255, 251, 244, 0.9);
+  --surface-strong: #fffdfa;
+  --surface-muted: rgba(255, 248, 237, 0.76);
+  --text: #1f2a37;
+  --text-soft: #5c6a77;
+  --text-faint: #7d8a96;
+  --border: rgba(35, 58, 83, 0.12);
+  --accent: #0f766e;
+  --accent-strong: #155e75;
+  --accent-soft: rgba(15, 118, 110, 0.12);
+  --positive: #0f766e;
+  --negative: #c2410c;
+  --warning: #d97706;
+  --shadow: 0 24px 60px rgba(24, 42, 62, 0.08);
+  --radius-xl: 28px;
+  --radius-lg: 20px;
+  --radius-md: 14px;
+  --font-sans:
+    'Avenir Next', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    sans-serif;
+  --font-heading:
+    'DIN Alternate', 'Avenir Next Condensed', 'PingFang SC', 'Microsoft YaHei',
+    sans-serif;
+  --font-mono: 'JetBrains Mono', 'SFMono-Regular', ui-monospace, monospace;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(15, 118, 110, 0.12), transparent 34%),
+    radial-gradient(circle at top right, rgba(217, 119, 6, 0.12), transparent 22%),
+    linear-gradient(180deg, #faf6ee 0%, #f3ede2 100%);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  color: var(--text);
+  background: transparent;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.glass-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+}
+
+.section-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.table-card .el-card__body,
+.panel-card .el-card__body {
+  padding: 22px;
+}
+
+.stat-positive {
+  color: var(--positive);
+}
+
+.stat-negative {
+  color: var(--negative);
+}
+
+.stat-neutral {
+  color: var(--text-soft);
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.el-card {
+  border-radius: var(--radius-lg);
+  border-color: var(--border);
+  box-shadow: none;
+  background: var(--surface-strong);
+}
+
+.el-button--primary {
+  --el-button-bg-color: var(--accent);
+  --el-button-border-color: var(--accent);
+  --el-button-hover-bg-color: var(--accent-strong);
+  --el-button-hover-border-color: var(--accent-strong);
+  --el-button-active-bg-color: var(--accent-strong);
+  --el-button-active-border-color: var(--accent-strong);
+}
+
+.el-menu {
+  border-right: none;
+}
+
+.el-tag {
+  border-radius: 999px;
+}
+
+@media (max-width: 960px) {
+  .section-grid {
+    grid-template-columns: 1fr;
+  }
+}
