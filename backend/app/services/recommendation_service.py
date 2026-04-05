@@ -9,6 +9,7 @@ import duckdb
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.market_scope import DEFAULT_MARKET_SCOPE, SUPPORTED_MARKETS, infer_market_from_symbol, normalize_market_scope
 from app.models.recommendation import RecommendationJournal
 from app.services.market_store import MarketDataStore
 
@@ -21,8 +22,10 @@ class RecommendationService:
         *,
         generated_at: datetime,
         source: str,
+        market: str = DEFAULT_MARKET_SCOPE,
     ) -> None:
-        recommendations = market_store.get_recommendations()
+        normalized_market = normalize_market_scope(market)
+        recommendations = market_store.get_recommendations(normalized_market)
         if not recommendations:
             return
 
@@ -49,40 +52,49 @@ class RecommendationService:
 
     @staticmethod
     def ensure_seed(db: Session, market_store: MarketDataStore) -> None:
-        source = market_store.current_source()
-        if source == "sample":
-            has_sample_seed = (
-                db.query(RecommendationJournal)
-                .filter(RecommendationJournal.run_key.like("sample-%"))
-                .first()
-                is not None
-            )
-            if not has_sample_seed:
-                RecommendationService._seed_sample_history(db, market_store)
+        for market in SUPPORTED_MARKETS:
+            source = market_store.current_source(market)
+            if source == "sample":
+                has_sample_seed = any(
+                    infer_market_from_symbol(row.symbol) == market
+                    for row in db.query(RecommendationJournal)
+                    .filter(RecommendationJournal.run_key.like("sample-%"))
+                    .all()
+                )
+                if not has_sample_seed:
+                    RecommendationService._seed_sample_history(db, market_store, market=market)
 
-        has_current_run = (
-            db.query(RecommendationJournal)
-            .filter(RecommendationJournal.run_key.not_like("sample-%"))
-            .first()
-            is not None
-        )
-        if has_current_run:
-            return
-        RecommendationService.publish_current_run(
-            db,
-            market_store,
-            generated_at=datetime.now(ZoneInfo(get_settings().app_timezone)),
-            source=source,
-        )
+            has_current_run = any(
+                infer_market_from_symbol(row.symbol) == market
+                for row in db.query(RecommendationJournal)
+                .filter(RecommendationJournal.run_key.not_like("sample-%"))
+                .all()
+            )
+            if has_current_run:
+                continue
+            RecommendationService.publish_current_run(
+                db,
+                market_store,
+                generated_at=datetime.now(ZoneInfo(get_settings().app_timezone)),
+                source=source,
+                market=market,
+            )
 
     @staticmethod
-    def list_journal(db: Session, market_store: MarketDataStore, limit: int = 24) -> list[dict[str, object]]:
+    def list_journal(
+        db: Session,
+        market_store: MarketDataStore,
+        *,
+        market: str = DEFAULT_MARKET_SCOPE,
+        limit: int = 24,
+    ) -> list[dict[str, object]]:
+        normalized_market = normalize_market_scope(market)
         rows = (
             db.query(RecommendationJournal)
             .order_by(RecommendationJournal.generated_at.desc(), RecommendationJournal.id.desc())
-            .limit(limit)
             .all()
         )
+        rows = [row for row in rows if infer_market_from_symbol(row.symbol) == normalized_market][:limit]
         if not rows:
             return []
 
@@ -114,8 +126,13 @@ class RecommendationService:
         return journal
 
     @staticmethod
-    def _seed_sample_history(db: Session, market_store: MarketDataStore) -> None:
-        recommendations = market_store.get_recommendations()
+    def _seed_sample_history(
+        db: Session,
+        market_store: MarketDataStore,
+        *,
+        market: str = DEFAULT_MARKET_SCOPE,
+    ) -> None:
+        recommendations = market_store.get_recommendations(market)
         if not recommendations:
             return
 
@@ -151,7 +168,7 @@ class RecommendationService:
         timezone = ZoneInfo(settings.app_timezone)
         new_rows: list[RecommendationJournal] = []
         for trade_date in selected_dates:
-            run_key = f"sample-{trade_date.replace('-', '')}"
+            run_key = f"sample-{market}-{trade_date.replace('-', '')}"
             exists = db.query(RecommendationJournal).filter_by(run_key=run_key).first()
             if exists is not None:
                 continue

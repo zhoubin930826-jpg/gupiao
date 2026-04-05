@@ -6,7 +6,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { addToWatchlist, getStockDetail, removeFromWatchlist } from '@/api/market'
 import CandlestickChart from '@/components/charts/CandlestickChart.vue'
 import PageHeader from '@/components/PageHeader.vue'
-import type { StockDetail } from '@/types/market'
+import type { CapitalFlowTone, EventTone, MoveBias, StockDetail } from '@/types/market'
 
 const route = useRoute()
 const router = useRouter()
@@ -22,6 +22,86 @@ function formatMaybePercent(value: number | null) {
 
 function formatMaybeNumber(value: number | null) {
   return value === null ? '暂无' : value.toFixed(2)
+}
+
+function formatMaybeAmount(value: number | null) {
+  return value === null ? '暂无' : `${value >= 0 ? '+' : ''}${value.toFixed(1)} 亿`
+}
+
+function moveBiasLabel(value: MoveBias | null | undefined) {
+  if (value === 'bullish') {
+    return '偏多驱动'
+  }
+  if (value === 'cautious') {
+    return '风险占优'
+  }
+  return '多空交织'
+}
+
+function moveBiasType(value: MoveBias | null | undefined) {
+  if (value === 'bullish') {
+    return 'success'
+  }
+  if (value === 'cautious') {
+    return 'danger'
+  }
+  return 'warning'
+}
+
+function diagnosisLabel(recommended: boolean) {
+  return recommended ? '今日已推荐' : '今日未推荐'
+}
+
+function diagnosisType(recommended: boolean) {
+  return recommended ? 'success' : 'warning'
+}
+
+function eventToneLabel(value: EventTone | null | undefined) {
+  if (value === 'positive') {
+    return '事件偏正面'
+  }
+  if (value === 'caution') {
+    return '事件偏谨慎'
+  }
+  return '事件中性'
+}
+
+function eventToneType(value: EventTone | null | undefined) {
+  if (value === 'positive') {
+    return 'success'
+  }
+  if (value === 'caution') {
+    return 'danger'
+  }
+  return 'info'
+}
+
+function capitalFlowToneLabel(value: CapitalFlowTone | null | undefined) {
+  if (value === 'positive') {
+    return '资金偏助攻'
+  }
+  if (value === 'caution') {
+    return '资金偏分歧'
+  }
+  return '资金中性'
+}
+
+function capitalFlowToneType(value: CapitalFlowTone | null | undefined) {
+  if (value === 'positive') {
+    return 'success'
+  }
+  if (value === 'caution') {
+    return 'danger'
+  }
+  return 'info'
+}
+
+function capitalFlowHint(status: 'ready' | 'derived' | 'placeholder') {
+  return status === 'ready'
+    ? '主力资金 + 龙虎榜月度统计'
+    : status === 'derived'
+      ? '基于现有样本的推断占位'
+      : '当前只拿到部分资金面信息'
 }
 
 async function loadDetail() {
@@ -177,6 +257,278 @@ watch(
           </section>
 
           <section class="section-grid detail-grid">
+            <el-card v-if="detail.event_analysis" class="panel-card">
+              <template #header>
+                <div class="card-head">
+                  <span>事件层</span>
+                  <span class="hint">公告与业绩预告的结构化催化</span>
+                </div>
+              </template>
+              <div class="move-analysis">
+                <div class="move-summary">
+                  <el-tag :type="eventToneType(detail.event_analysis.tone)" effect="dark">
+                    {{ eventToneLabel(detail.event_analysis.tone) }}
+                  </el-tag>
+                  <p>{{ detail.event_analysis.summary }}</p>
+                </div>
+
+                <div class="tag-row">
+                  <el-tag v-for="tag in detail.event_analysis.tags" :key="tag" effect="plain">
+                    {{ tag }}
+                  </el-tag>
+                </div>
+
+                <div v-if="detail.event_analysis.items.length" class="event-list">
+                  <div
+                    v-for="item in detail.event_analysis.items"
+                    :key="`${item.date}-${item.title}-${item.headline}`"
+                    class="driver-item"
+                    :class="item.tone === 'caution' ? 'negative-driver' : 'positive-driver'"
+                  >
+                    <div class="signal-head">
+                      <strong>{{ item.category }} · {{ item.title }}</strong>
+                      <span>{{ item.date ?? '近期' }}</span>
+                    </div>
+                    <p>{{ item.headline }}</p>
+                    <small>{{ item.detail }}</small>
+                    <a v-if="item.url" :href="item.url" target="_blank" rel="noreferrer">
+                      查看原文
+                    </a>
+                  </div>
+                </div>
+                <p v-else class="empty-event-copy">
+                  当前没有抓到明确的结构化事件催化，事件层暂时以中性观察为主。
+                </p>
+
+                <div class="watch-block">
+                  <span class="driver-label">事件层要盯什么</span>
+                  <ul class="copy-list">
+                    <li v-for="point in detail.event_analysis.watch_points" :key="point">{{ point }}</li>
+                  </ul>
+                </div>
+              </div>
+            </el-card>
+
+            <el-card v-if="detail.capital_flow_analysis" class="panel-card">
+              <template #header>
+                <div class="card-head">
+                  <span>资金面</span>
+                  <span class="hint">{{ capitalFlowHint(detail.capital_flow_analysis.status) }}</span>
+                </div>
+              </template>
+              <div class="move-analysis">
+                <div class="move-summary">
+                  <el-tag :type="capitalFlowToneType(detail.capital_flow_analysis.tone)" effect="dark">
+                    {{ capitalFlowToneLabel(detail.capital_flow_analysis.tone) }}
+                  </el-tag>
+                  <p>{{ detail.capital_flow_analysis.summary }}</p>
+                </div>
+
+                <div class="fundamental-grid">
+                  <div class="fundamental-item">
+                    <span>最近交易日</span>
+                    <strong>{{ detail.capital_flow_analysis.latest_trade_date ?? '暂无' }}</strong>
+                  </div>
+                  <div class="fundamental-item">
+                    <span>1 日主力净流入</span>
+                    <strong>{{ formatMaybeAmount(detail.capital_flow_analysis.main_net_inflow_1d) }}</strong>
+                  </div>
+                  <div class="fundamental-item">
+                    <span>1 日净占比</span>
+                    <strong>{{ formatMaybePercent(detail.capital_flow_analysis.main_net_ratio_1d) }}</strong>
+                  </div>
+                  <div class="fundamental-item">
+                    <span>5 日主力净流入</span>
+                    <strong>{{ formatMaybeAmount(detail.capital_flow_analysis.main_net_inflow_5d) }}</strong>
+                  </div>
+                  <div class="fundamental-item">
+                    <span>5 日净流入天数</span>
+                    <strong>
+                      {{
+                        detail.capital_flow_analysis.active_days_5d === null
+                          ? '暂无'
+                          : `${detail.capital_flow_analysis.active_days_5d} / 5`
+                      }}
+                    </strong>
+                  </div>
+                  <div class="fundamental-item">
+                    <span>超大单净流入</span>
+                    <strong>{{ formatMaybeAmount(detail.capital_flow_analysis.ultra_large_net_inflow_1d) }}</strong>
+                  </div>
+                  <div class="fundamental-item">
+                    <span>近一月上榜次数</span>
+                    <strong>
+                      {{
+                        detail.capital_flow_analysis.lhb_on_list_count === null
+                          ? '暂无'
+                          : `${detail.capital_flow_analysis.lhb_on_list_count} 次`
+                      }}
+                    </strong>
+                  </div>
+                  <div class="fundamental-item">
+                    <span>龙虎榜净买额</span>
+                    <strong>{{ formatMaybeAmount(detail.capital_flow_analysis.lhb_net_buy_amount) }}</strong>
+                  </div>
+                </div>
+
+                <div class="watch-block">
+                  <span class="driver-label">资金面怎么盯</span>
+                  <ul class="copy-list">
+                    <li v-for="point in detail.capital_flow_analysis.watch_points" :key="point">{{ point }}</li>
+                  </ul>
+                </div>
+              </div>
+            </el-card>
+
+            <el-card v-if="detail.recommendation_diagnosis" class="panel-card">
+              <template #header>
+                <div class="card-head">
+                  <span>推荐诊断</span>
+                  <span class="hint">回答今天为什么推，或为什么没推</span>
+                </div>
+              </template>
+              <div class="diagnosis-block">
+                <div class="move-summary">
+                  <el-tag
+                    :type="diagnosisType(detail.recommendation_diagnosis.is_recommended)"
+                    effect="dark"
+                  >
+                    {{ diagnosisLabel(detail.recommendation_diagnosis.is_recommended) }}
+                  </el-tag>
+                  <p>{{ detail.recommendation_diagnosis.summary }}</p>
+                </div>
+
+                <div class="diagnosis-meta">
+                  <div class="fundamental-item">
+                    <span>当前排名</span>
+                    <strong>
+                      {{ detail.recommendation_diagnosis.current_rank }}/{{ detail.recommendation_diagnosis.total_candidates }}
+                    </strong>
+                  </div>
+                  <div class="fundamental-item">
+                    <span>推荐门槛</span>
+                    <strong>前 {{ detail.recommendation_diagnosis.recommendation_limit }}</strong>
+                  </div>
+                  <div class="fundamental-item">
+                    <span>距门槛差距</span>
+                    <strong>
+                      {{
+                        detail.recommendation_diagnosis.score_gap_to_cutoff === null
+                          ? '已入选'
+                          : `${detail.recommendation_diagnosis.score_gap_to_cutoff} 分`
+                      }}
+                    </strong>
+                  </div>
+                  <div class="fundamental-item">
+                    <span>门槛参考</span>
+                    <strong>
+                      {{
+                        detail.recommendation_diagnosis.cutoff_name
+                          ? `${detail.recommendation_diagnosis.cutoff_name} ${detail.recommendation_diagnosis.cutoff_score} 分`
+                          : '暂无'
+                      }}
+                    </strong>
+                  </div>
+                </div>
+
+                <div class="driver-columns">
+                  <div class="driver-group">
+                    <span class="driver-label">入选原因</span>
+                    <ul class="copy-list">
+                      <li
+                        v-for="point in detail.recommendation_diagnosis.reason_points"
+                        :key="point"
+                      >
+                        {{ point }}
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div class="driver-group">
+                    <span class="driver-label">
+                      {{ detail.recommendation_diagnosis.is_recommended ? '仍要注意' : '主要卡点' }}
+                    </span>
+                    <ul class="copy-list warning-list">
+                      <li
+                        v-for="point in detail.recommendation_diagnosis.blocking_points"
+                        :key="point"
+                      >
+                        {{ point }}
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div class="watch-block">
+                  <span class="driver-label">下一步怎么盯</span>
+                  <ul class="copy-list">
+                    <li
+                      v-for="point in detail.recommendation_diagnosis.action_points"
+                      :key="point"
+                    >
+                      {{ point }}
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </el-card>
+
+            <el-card v-if="detail.move_analysis" class="panel-card">
+              <template #header>
+                <div class="card-head">
+                  <span>涨跌归因</span>
+                  <span class="hint">基于价格、量能和财务快照推断</span>
+                </div>
+              </template>
+              <div class="move-analysis">
+                <div class="move-summary">
+                  <el-tag :type="moveBiasType(detail.move_analysis.bias)" effect="dark">
+                    {{ moveBiasLabel(detail.move_analysis.bias) }}
+                  </el-tag>
+                  <p>{{ detail.move_analysis.summary }}</p>
+                </div>
+
+                <div class="driver-columns">
+                  <div class="driver-group">
+                    <span class="driver-label">上涨驱动</span>
+                    <div
+                      v-for="driver in detail.move_analysis.positive_drivers"
+                      :key="driver.title"
+                      class="driver-item positive-driver"
+                    >
+                      <div class="signal-head">
+                        <strong>{{ driver.title }}</strong>
+                        <span>{{ driver.strength }} 分</span>
+                      </div>
+                      <p>{{ driver.detail }}</p>
+                    </div>
+                  </div>
+
+                  <div class="driver-group">
+                    <span class="driver-label">下跌压力</span>
+                    <div
+                      v-for="driver in detail.move_analysis.negative_drivers"
+                      :key="driver.title"
+                      class="driver-item negative-driver"
+                    >
+                      <div class="signal-head">
+                        <strong>{{ driver.title }}</strong>
+                        <span>{{ driver.strength }} 分</span>
+                      </div>
+                      <p>{{ driver.detail }}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="watch-block">
+                  <span class="driver-label">接下来要盯什么</span>
+                  <ul class="copy-list">
+                    <li v-for="point in detail.move_analysis.watch_points" :key="point">{{ point }}</li>
+                  </ul>
+                </div>
+              </div>
+            </el-card>
+
             <el-card class="panel-card">
               <template #header>
                 <div class="card-head">
@@ -343,10 +695,98 @@ watch(
   gap: 18px;
 }
 
+.move-analysis {
+  display: grid;
+  gap: 18px;
+}
+
+.move-summary {
+  display: grid;
+  gap: 10px;
+}
+
+.move-summary p {
+  margin: 0;
+  line-height: 1.7;
+  color: var(--text-soft);
+}
+
+.driver-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.driver-group {
+  display: grid;
+  gap: 12px;
+}
+
+.driver-label {
+  font-size: 13px;
+  color: var(--text-faint);
+}
+
+.driver-item {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 18px;
+}
+
+.driver-item p {
+  margin: 0;
+  line-height: 1.7;
+}
+
+.driver-item small {
+  color: var(--text-faint);
+  line-height: 1.6;
+}
+
+.driver-item a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.positive-driver {
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.negative-driver {
+  background: rgba(194, 65, 12, 0.08);
+}
+
+.watch-block {
+  display: grid;
+  gap: 10px;
+}
+
+.event-list {
+  display: grid;
+  gap: 12px;
+}
+
+.empty-event-copy {
+  margin: 0;
+  color: var(--text-soft);
+  line-height: 1.7;
+}
+
 .fundamental-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+.diagnosis-block,
+.diagnosis-meta {
+  display: grid;
+  gap: 14px;
+}
+
+.diagnosis-meta {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .fundamental-item {
@@ -406,6 +846,8 @@ watch(
     grid-template-columns: 1fr;
   }
 
+  .driver-columns,
+  .diagnosis-meta,
   .fundamental-grid {
     grid-template-columns: 1fr;
   }

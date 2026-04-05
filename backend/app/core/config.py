@@ -33,7 +33,10 @@ class Settings(BaseSettings):
     scheduler_signal_minute: int = 20
     scheduler_publish_hour: int = 18
     scheduler_publish_minute: int = 30
+    scheduler_hk_offset_minutes: int = 15
+    scheduler_us_offset_minutes: int = 30
     enable_akshare_sync: bool = False
+    market_data_provider_order: list[str] = Field(default_factory=lambda: ["akshare", "sample"])
     akshare_request_timeout: int = 20
     akshare_retry_attempts: int = 3
     akshare_retry_delay_ms: int = 1200

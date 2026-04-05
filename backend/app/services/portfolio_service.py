@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.market_scope import DEFAULT_MARKET_SCOPE, infer_market_from_symbol, normalize_market_scope, normalize_symbol
 from app.models.portfolio import PortfolioPosition, PortfolioProfile
 from app.schemas.market import (
     PortfolioPositionCreateRequest,
@@ -17,19 +18,24 @@ from app.services.market_store import MarketDataStore
 
 class PortfolioService:
     @staticmethod
-    def get_profile(db: Session) -> PortfolioProfile:
-        profile = db.query(PortfolioProfile).first()
+    def get_profile(db: Session, market: str = DEFAULT_MARKET_SCOPE) -> PortfolioProfile:
+        profile = db.query(PortfolioProfile).filter_by(market=normalize_market_scope(market)).first()
         if profile is None:
             raise RuntimeError("Portfolio profile was not initialized.")
         return profile
 
     @classmethod
-    def read_profile(cls, db: Session) -> PortfolioProfile:
-        return cls.get_profile(db)
+    def read_profile(cls, db: Session, market: str = DEFAULT_MARKET_SCOPE) -> PortfolioProfile:
+        return cls.get_profile(db, market)
 
     @classmethod
-    def update_profile(cls, db: Session, payload: PortfolioProfileConfig) -> PortfolioProfile:
-        profile = cls.get_profile(db)
+    def update_profile(
+        cls,
+        db: Session,
+        payload: PortfolioProfileConfig,
+        market: str = DEFAULT_MARKET_SCOPE,
+    ) -> PortfolioProfile:
+        profile = cls.get_profile(db, market)
         for field, value in payload.model_dump().items():
             setattr(profile, field, value)
         db.add(profile)
@@ -43,13 +49,19 @@ class PortfolioService:
         db: Session,
         market_store: MarketDataStore,
         *,
+        market: str = DEFAULT_MARKET_SCOPE,
         status: str | None = None,
     ) -> dict[str, object]:
-        profile = cls.read_profile(db)
+        normalized_market = normalize_market_scope(market)
+        profile = cls.read_profile(db, normalized_market)
         query = db.query(PortfolioPosition)
         if status:
             query = query.filter(PortfolioPosition.status == status)
-        rows = query.order_by(PortfolioPosition.updated_at.desc(), PortfolioPosition.id.desc()).all()
+        rows = [
+            row
+            for row in query.order_by(PortfolioPosition.updated_at.desc(), PortfolioPosition.id.desc()).all()
+            if infer_market_from_symbol(row.symbol) == normalized_market
+        ]
         snapshot_map = market_store.get_snapshot_briefs([row.symbol for row in rows])
 
         serialized = [cls._serialize(row, snapshot_map.get(row.symbol)) for row in rows]
@@ -61,18 +73,15 @@ class PortfolioService:
                 row["weight_pct"] = round(float(row["market_value"]) / estimated_total_assets * 100, 2)
             else:
                 row["weight_pct"] = None
+            row["risk_level"], row["risk_flags"] = cls._position_risk(row)
 
-        summary["largest_weight_pct"] = (
-            round(max((float(row["weight_pct"]) for row in serialized if row["weight_pct"] is not None), default=0.0), 2)
-            if serialized
-            else None
-        )
-        if summary["largest_weight_pct"] == 0:
-            summary["largest_weight_pct"] = None
+        industry_exposure = cls._build_industry_exposure(serialized, estimated_total_assets=estimated_total_assets)
+        cls._augment_summary(summary, serialized, industry_exposure)
 
         return {
             "profile": PortfolioProfileConfig.model_validate(profile).model_dump(),
             "summary": summary,
+            "industry_exposure": industry_exposure,
             "positions": serialized,
         }
 
@@ -83,7 +92,7 @@ class PortfolioService:
         market_store: MarketDataStore,
         payload: PortfolioPositionCreateRequest,
     ) -> dict[str, object]:
-        symbol = str(payload.symbol).zfill(6)
+        symbol = normalize_symbol(payload.symbol)
         snapshot = market_store.get_snapshot_briefs([symbol]).get(symbol)
         if snapshot is None:
             raise KeyError(symbol)
@@ -234,6 +243,8 @@ class PortfolioService:
             "realized_pnl": realized_pnl,
             "realized_return": realized_return,
             "weight_pct": None,
+            "risk_level": "low",
+            "risk_flags": [],
             "stop_distance_pct": stop_distance_pct,
             "target_distance_pct": target_distance_pct,
             "created_at": item.created_at.isoformat(timespec="seconds"),
@@ -260,12 +271,28 @@ class PortfolioService:
             sum(float(row["realized_pnl"]) for row in closed_rows if row["realized_pnl"] is not None),
             2,
         )
+        winning_count = sum(
+            1 for row in holding_rows if row["unrealized_return"] is not None and float(row["unrealized_return"]) > 0
+        )
+        losing_count = sum(
+            1 for row in holding_rows if row["unrealized_return"] is not None and float(row["unrealized_return"]) < 0
+        )
+        capital_at_risk = round(
+            sum(
+                max(float(row["latest_price"]) - float(row["stop_loss_price"]), 0.0) * float(row["quantity"])
+                for row in holding_rows
+                if row["latest_price"] is not None
+                and row["stop_loss_price"] is not None
+            ),
+            2,
+        )
 
         initial_capital = float(profile.initial_capital)
         estimated_cash = round(initial_capital - invested_cost + realized_pnl, 2)
         estimated_total_assets = round(estimated_cash + market_value, 2)
         total_return_pct = round((estimated_total_assets / initial_capital - 1) * 100, 2) if initial_capital > 0 else 0.0
         utilization_pct = round(invested_cost / initial_capital * 100, 2) if initial_capital > 0 else 0.0
+        capital_at_risk_pct = round(capital_at_risk / estimated_total_assets * 100, 2) if estimated_total_assets > 0 else 0.0
 
         return {
             "initial_capital": round(initial_capital, 2),
@@ -279,8 +306,138 @@ class PortfolioService:
             "realized_pnl": realized_pnl,
             "total_return_pct": total_return_pct,
             "utilization_pct": utilization_pct,
+            "winning_count": winning_count,
+            "losing_count": losing_count,
+            "at_risk_position_count": 0,
+            "capital_at_risk": capital_at_risk,
+            "capital_at_risk_pct": capital_at_risk_pct,
+            "top_industry": None,
+            "top_industry_weight_pct": None,
+            "worst_position_name": None,
+            "worst_position_return_pct": None,
+            "risk_level": "low",
             "largest_weight_pct": None,
         }
+
+    @staticmethod
+    def _build_industry_exposure(
+        rows: list[dict[str, object]],
+        *,
+        estimated_total_assets: float,
+    ) -> list[dict[str, object]]:
+        buckets: dict[str, float] = {}
+        for row in rows:
+            if row["status"] != "holding" or row["market_value"] is None:
+                continue
+            industry = str(row["industry"] or row["board"] or "未分类")
+            buckets[industry] = buckets.get(industry, 0.0) + float(row["market_value"])
+
+        exposure = [
+            {
+                "industry": industry,
+                "market_value": round(value, 2),
+                "weight_pct": round(value / estimated_total_assets * 100, 2) if estimated_total_assets > 0 else 0.0,
+            }
+            for industry, value in buckets.items()
+        ]
+        exposure.sort(key=lambda item: float(item["weight_pct"]), reverse=True)
+        return exposure
+
+    @classmethod
+    def _augment_summary(
+        cls,
+        summary: dict[str, object],
+        rows: list[dict[str, object]],
+        industry_exposure: list[dict[str, object]],
+    ) -> None:
+        largest_weight = round(
+            max((float(row["weight_pct"]) for row in rows if row["weight_pct"] is not None), default=0.0),
+            2,
+        )
+        summary["largest_weight_pct"] = largest_weight or None
+
+        if industry_exposure:
+            top_industry = industry_exposure[0]
+            summary["top_industry"] = str(top_industry["industry"])
+            summary["top_industry_weight_pct"] = float(top_industry["weight_pct"])
+
+        holding_rows = [row for row in rows if row["status"] == "holding"]
+        at_risk_rows = [row for row in holding_rows if row["risk_level"] == "high"]
+        summary["at_risk_position_count"] = len(at_risk_rows)
+
+        worst_row = min(
+            (
+                row for row in holding_rows
+                if row["unrealized_return"] is not None
+            ),
+            key=lambda row: float(row["unrealized_return"]),
+            default=None,
+        )
+        if worst_row is not None:
+            summary["worst_position_name"] = str(worst_row["name"])
+            summary["worst_position_return_pct"] = float(worst_row["unrealized_return"])
+
+        summary["risk_level"] = cls._portfolio_risk_level(summary)
+
+    @staticmethod
+    def _position_risk(row: dict[str, object]) -> tuple[str, list[str]]:
+        if row["status"] != "holding":
+            return "low", []
+
+        flags: list[str] = []
+        latest_price = _optional_float(row.get("latest_price"))
+        stop_loss_price = _optional_float(row.get("stop_loss_price"))
+        target_distance_pct = _optional_float(row.get("target_distance_pct"))
+        stop_distance_pct = _optional_float(row.get("stop_distance_pct"))
+        unrealized_return = _optional_float(row.get("unrealized_return"))
+        weight_pct = _optional_float(row.get("weight_pct"))
+
+        if latest_price is not None and stop_loss_price is not None and latest_price <= stop_loss_price:
+            flags.append("已触发止损")
+        elif stop_distance_pct is not None and stop_distance_pct >= -3:
+            flags.append("接近止损位")
+
+        if unrealized_return is not None and unrealized_return <= -8:
+            flags.append("回撤偏大")
+        elif unrealized_return is not None and unrealized_return <= -4:
+            flags.append("转弱中")
+
+        if weight_pct is not None and weight_pct >= 35:
+            flags.append("仓位过重")
+        elif weight_pct is not None and weight_pct >= 25:
+            flags.append("仓位偏重")
+
+        if target_distance_pct is not None and 0 <= target_distance_pct <= 5:
+            flags.append("接近目标位")
+
+        if any(flag in flags for flag in ("已触发止损", "回撤偏大", "仓位过重")):
+            return "high", flags
+        if flags:
+            return "medium", flags
+        return "low", []
+
+    @staticmethod
+    def _portfolio_risk_level(summary: dict[str, object]) -> str:
+        largest_weight_pct = _optional_float(summary.get("largest_weight_pct")) or 0.0
+        top_industry_weight_pct = _optional_float(summary.get("top_industry_weight_pct")) or 0.0
+        at_risk_position_count = int(summary.get("at_risk_position_count") or 0)
+        capital_at_risk_pct = _optional_float(summary.get("capital_at_risk_pct")) or 0.0
+
+        if (
+            at_risk_position_count >= 2
+            or largest_weight_pct >= 35
+            or top_industry_weight_pct >= 50
+            or capital_at_risk_pct >= 12
+        ):
+            return "high"
+        if (
+            at_risk_position_count >= 1
+            or largest_weight_pct >= 25
+            or top_industry_weight_pct >= 35
+            or capital_at_risk_pct >= 6
+        ):
+            return "medium"
+        return "low"
 
 
 def _now() -> datetime:

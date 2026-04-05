@@ -26,12 +26,67 @@ def test_stocks_list(client: TestClient) -> None:
     assert len(payload["rows"]) > 0
 
 
+def test_multi_market_switching(client: TestClient) -> None:
+    hk_response = client.get("/api/stocks", params={"market": "hk", "page_size": 5})
+    assert hk_response.status_code == 200
+    hk_payload = hk_response.json()
+    assert hk_payload["total"] > 0
+    assert hk_payload["rows"][0]["symbol"].endswith(".HK")
+
+    us_response = client.get("/api/stocks", params={"market": "us", "page_size": 5})
+    assert us_response.status_code == 200
+    us_payload = us_response.json()
+    assert us_payload["total"] > 0
+    assert us_payload["rows"][0]["symbol"].isupper()
+
+    hk_tasks = client.get("/api/tasks", params={"market": "hk"}).json()
+    assert any(str(item["schedule"]).startswith("每日") for item in hk_tasks)
+    assert any(item["next_run_at"] is not None for item in hk_tasks)
+
+    us_tasks = client.get("/api/tasks", params={"market": "us"}).json()
+    assert any(str(item["schedule"]).startswith("每日") for item in us_tasks)
+    assert any(item["next_run_at"] is not None for item in us_tasks)
+
+
 def test_stock_detail_contains_fundamental_snapshot(client: TestClient) -> None:
-    response = client.get("/api/stocks/300308")
+    recommendation_rows = client.get("/api/recommendations").json()
+    assert recommendation_rows
+    symbol = recommendation_rows[0]["symbol"]
+
+    response = client.get(f"/api/stocks/{symbol}")
     assert response.status_code == 200
     payload = response.json()
     assert payload["fundamental"] is not None
-    assert payload["fundamental"]["roe"] is not None
+    assert "roe" in payload["fundamental"]
+    assert payload["move_analysis"] is not None
+    assert payload["move_analysis"]["summary"]
+    assert len(payload["move_analysis"]["positive_drivers"]) >= 1
+    assert payload["event_analysis"] is not None
+    assert payload["event_analysis"]["summary"]
+    assert payload["capital_flow_analysis"] is not None
+    assert payload["capital_flow_analysis"]["status"] in {"ready", "derived", "placeholder"}
+    assert payload["capital_flow_analysis"]["tone"] in {"positive", "neutral", "caution"}
+    assert payload["recommendation_diagnosis"] is not None
+    assert payload["recommendation_diagnosis"]["is_recommended"] is True
+
+
+def test_stock_detail_explains_why_not_recommended(client: TestClient) -> None:
+    recommendation_rows = client.get("/api/recommendations").json()
+    recommended_symbols = {row["symbol"] for row in recommendation_rows}
+    stock_rows = client.get("/api/stocks", params={"page_size": 200}).json()["rows"]
+    non_recommended = next((row for row in stock_rows if row["symbol"] not in recommended_symbols), None)
+    if non_recommended is None:
+        pytest.skip("Current dataset does not contain extra non-recommended stocks.")
+
+    response = client.get(f"/api/stocks/{non_recommended['symbol']}")
+    assert response.status_code == 200
+    payload = response.json()
+    diagnosis = payload["recommendation_diagnosis"]
+    assert diagnosis is not None
+    assert diagnosis["is_recommended"] is False
+    assert diagnosis["current_rank"] > diagnosis["recommendation_limit"]
+    assert len(diagnosis["blocking_points"]) >= 1
+    assert len(diagnosis["action_points"]) >= 1
 
 
 def test_recommendations_include_performance(client: TestClient) -> None:
@@ -40,6 +95,10 @@ def test_recommendations_include_performance(client: TestClient) -> None:
     payload = response.json()
     assert len(payload) > 0
     assert "recent_return_5d" in payload[0]
+    assert payload[0]["move_summary"] is not None
+    assert payload[0]["move_bias"] in {"bullish", "mixed", "cautious"}
+    assert payload[0]["event_summary"] is not None
+    assert payload[0]["event_tone"] in {"positive", "neutral", "caution"}
 
 
 def test_recommendation_journal_exists(client: TestClient) -> None:
@@ -57,6 +116,25 @@ def test_recommendation_review_exists(client: TestClient) -> None:
     assert payload["total_samples"] > 0
     assert len(payload["window_metrics"]) == 3
     assert any(item["sample_size"] > 0 for item in payload["window_metrics"])
+
+
+def test_dashboard_contains_market_context(client: TestClient) -> None:
+    response = client.get("/api/dashboard/summary", params={"market": "cn"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["market_context"]["regime"] in {"risk_on", "balanced", "risk_off"}
+    assert payload["market_context"]["regime_label"]
+    assert payload["market_context"]["summary"]
+    assert payload["market_context"]["action_hint"]
+    assert len(payload["market_context"]["metrics"]) == 4
+    assert len(payload["market_context"]["watch_points"]) >= 1
+    assert payload["breadth_snapshot"]["total_count"] > 0
+    assert payload["breadth_snapshot"]["scope_label"]
+    assert len(payload["benchmark_indices"]) >= 1
+    assert payload["benchmark_indices"][0]["trend"]
+    assert payload["market_capital_flow"]["status"] in {"ready", "derived", "placeholder"}
+    assert payload["market_capital_flow"]["summary"]
+    assert len(payload["market_capital_flow"]["metrics"]) == 4
 
 
 def test_strategy_roundtrip(client: TestClient) -> None:
@@ -78,6 +156,18 @@ def test_tasks_endpoint(client: TestClient) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert len(payload) >= 1
+
+
+def test_data_source_overview(client: TestClient) -> None:
+    response = client.get("/api/data-sources/overview")
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["items"]) >= 1
+    assert any(item["provider_key"] == "sample" for item in payload["items"])
+    assert "fallback_chain" in payload
+    assert payload["event_sync"]["status"] in {"idle", "partial", "placeholder", "ready"}
+    assert "公告" in payload["event_sync"]["configured_sources"]
+    assert payload["event_sync"]["coverage_count"] >= 0
 
 
 def test_watchlist_crud(client: TestClient) -> None:
@@ -213,6 +303,9 @@ def test_portfolio_profile_and_position_crud(client: TestClient) -> None:
     assert overview.status_code == 200
     overview_payload = overview.json()
     assert overview_payload["summary"]["holding_count"] >= 1
+    assert overview_payload["summary"]["risk_level"] in {"low", "medium", "high"}
+    assert "industry_exposure" in overview_payload
+    assert isinstance(overview_payload["positions"][0]["risk_flags"], list)
     assert any(item["id"] == position_id for item in overview_payload["positions"])
 
     close = client.put(

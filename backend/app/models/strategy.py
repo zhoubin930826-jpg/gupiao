@@ -10,6 +10,7 @@ class StrategyProfile(Base):
     __tablename__ = "strategy_profiles"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    market: Mapped[str] = mapped_column(String(8), default="cn", index=True)
     technical_weight: Mapped[int] = mapped_column(Integer, default=35)
     fundamental_weight: Mapped[int] = mapped_column(Integer, default=25)
     money_flow_weight: Mapped[int] = mapped_column(Integer, default=25)

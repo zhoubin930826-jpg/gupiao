@@ -10,6 +10,7 @@ class PortfolioProfile(Base):
     __tablename__ = "portfolio_profiles"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    market: Mapped[str] = mapped_column(String(8), default="cn", index=True)
     name: Mapped[str] = mapped_column(String(64), default="本地账户")
     initial_capital: Mapped[float] = mapped_column(Float, default=500000.0)
     benchmark: Mapped[str] = mapped_column(String(32), default="沪深300")

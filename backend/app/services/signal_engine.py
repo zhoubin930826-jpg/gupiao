@@ -6,6 +6,8 @@ from typing import Any, Mapping
 
 import pandas as pd
 
+from app.services.move_analysis_service import build_move_analysis
+
 
 @dataclass(frozen=True, slots=True)
 class StrategyWeights:
@@ -138,6 +140,17 @@ def enrich_stock_snapshot(
     )
     entry_window = _entry_window(close=close, ma5=ma5, ma20=ma20, near_high_ratio=near_high_ratio)
     expected_holding_days = _holding_days(strategy.rebalance_cycle, total_score)
+    move_analysis = build_move_analysis(
+        latest_price=latest_price,
+        change_pct=change_pct,
+        turnover_ratio=turnover_ratio,
+        pe_ttm=pe_ttm,
+        market_cap=market_cap,
+        history_df=history_df,
+        fundamental=fundamental,
+        volume_ratio=volume_ratio,
+        min_turnover=strategy.min_turnover,
+    )
 
     return {
         "symbol": symbol,
@@ -157,6 +170,7 @@ def enrich_stock_snapshot(
         "risk": risk_notes[0],
         "entry_window": entry_window,
         "expected_holding_days": expected_holding_days,
+        "move_analysis": move_analysis,
         "signal_breakdown": [
             {
                 "dimension": "技术面",

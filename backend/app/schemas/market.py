@@ -7,9 +7,13 @@ TradePlanStatus = Literal["planned", "active", "closed", "cancelled"]
 TradePlanSource = Literal["manual", "recommendation", "watchlist"]
 PortfolioPositionStatus = Literal["holding", "closed"]
 PortfolioPositionSource = Literal["manual", "trade_plan", "recommendation", "watchlist"]
+PortfolioRiskLevel = Literal["low", "medium", "high"]
 AlertStatus = Literal["active", "handled", "resolved"]
 AlertSeverity = Literal["critical", "warning", "info"]
 AlertCategory = Literal["trade_plan", "portfolio", "watchlist"]
+MoveBias = Literal["bullish", "mixed", "cautious"]
+EventTone = Literal["positive", "neutral", "caution"]
+CapitalFlowTone = Literal["positive", "neutral", "caution"]
 
 
 class HealthResponse(BaseModel):
@@ -53,6 +57,10 @@ class RecommendationItem(BaseModel):
     latest_price: float | None = None
     recent_return_5d: float | None = None
     recent_return_20d: float | None = None
+    move_bias: MoveBias | None = None
+    move_summary: str | None = None
+    event_tone: EventTone | None = None
+    event_summary: str | None = None
     in_watchlist: bool = False
 
 
@@ -122,9 +130,57 @@ class RecommendationReviewResponse(BaseModel):
     samples: list[RecommendationReviewSample]
 
 
+class MarketContextSummary(BaseModel):
+    regime: Literal["risk_on", "balanced", "risk_off"]
+    regime_label: str
+    summary: str
+    action_hint: str
+    watch_points: list[str]
+    metrics: list[MetricCard]
+
+
+class BenchmarkIndex(BaseModel):
+    code: str
+    name: str
+    latest_price: float
+    change_pct: float
+    return_20d: float | None = None
+    trend: str
+    takeaway: str
+
+
+class MarketBreadthSnapshot(BaseModel):
+    scope_label: str
+    total_count: int
+    advancers: int
+    decliners: int
+    advance_ratio: float
+    strong_count: int
+    strong_ratio: float
+    avg_change: float
+    avg_turnover: float
+    top_industry: str | None = None
+    top_two_share: float
+    limit_up_like: int | None = None
+    limit_down_like: int | None = None
+    summary: str
+
+
+class MarketCapitalFlowOverview(BaseModel):
+    status: Literal["ready", "derived", "placeholder"]
+    scope_label: str
+    summary: str
+    watch_points: list[str]
+    metrics: list[MetricCard]
+
+
 class DashboardSummary(BaseModel):
     headline: str
     updated_at: str
+    market_context: MarketContextSummary
+    benchmark_indices: list[BenchmarkIndex]
+    breadth_snapshot: MarketBreadthSnapshot
+    market_capital_flow: MarketCapitalFlowOverview
     market_overview: list[MetricCard]
     hot_industries: list[IndustryHeat]
     market_pulse: list[MarketPulsePoint]
@@ -182,12 +238,82 @@ class FundamentalSnapshot(BaseModel):
     operating_cashflow_per_share: float | None = None
 
 
+class MoveDriver(BaseModel):
+    title: str
+    detail: str
+    strength: int
+    tone: Literal["positive", "negative"]
+
+
+class MoveAnalysis(BaseModel):
+    bias: MoveBias
+    summary: str
+    positive_drivers: list[MoveDriver]
+    negative_drivers: list[MoveDriver]
+    watch_points: list[str]
+
+
+class EventItem(BaseModel):
+    date: str | None = None
+    category: str
+    title: str
+    headline: str
+    detail: str
+    tone: EventTone
+    source: str
+    url: str | None = None
+
+
+class EventAnalysis(BaseModel):
+    tone: EventTone
+    summary: str
+    tags: list[str]
+    items: list[EventItem]
+    watch_points: list[str]
+
+
+class CapitalFlowAnalysis(BaseModel):
+    status: Literal["ready", "derived", "placeholder"]
+    tone: CapitalFlowTone
+    summary: str
+    latest_trade_date: str | None = None
+    main_net_inflow_1d: float | None = None
+    main_net_ratio_1d: float | None = None
+    main_net_inflow_5d: float | None = None
+    active_days_5d: int | None = None
+    ultra_large_net_inflow_1d: float | None = None
+    lhb_on_list_count: int | None = None
+    lhb_recent_date: str | None = None
+    lhb_net_buy_amount: float | None = None
+    watch_points: list[str]
+
+
+class RecommendationDiagnosis(BaseModel):
+    is_recommended: bool
+    current_rank: int
+    total_candidates: int
+    recommendation_limit: int
+    gap_to_limit: int
+    score_gap_to_cutoff: int | None = None
+    cutoff_symbol: str | None = None
+    cutoff_name: str | None = None
+    cutoff_score: int | None = None
+    summary: str
+    reason_points: list[str]
+    blocking_points: list[str]
+    action_points: list[str]
+
+
 class StockDetail(StockItem):
     price_series: list[PricePoint]
     thesis_points: list[str]
     risk_notes: list[str]
     signal_breakdown: list[SignalBreakdown]
     fundamental: FundamentalSnapshot | None = None
+    move_analysis: MoveAnalysis | None = None
+    event_analysis: EventAnalysis | None = None
+    capital_flow_analysis: CapitalFlowAnalysis | None = None
+    recommendation_diagnosis: RecommendationDiagnosis | None = None
 
 
 class StrategyConfig(BaseModel):
@@ -215,6 +341,41 @@ class SyncTask(BaseModel):
     next_run_at: str | None
     message: str
     source: str
+
+
+class DataSourceStatusItem(BaseModel):
+    provider_key: str
+    display_name: str
+    enabled: bool
+    priority: int
+    supports_snapshot: bool
+    supports_history: bool
+    supports_fundamental: bool
+    last_status: Literal["idle", "success", "warning"]
+    last_message: str
+    last_run_at: str | None = None
+    last_success_at: str | None = None
+    last_failure_at: str | None = None
+    updated_at: str
+
+
+class EventSyncOverview(BaseModel):
+    status: Literal["idle", "partial", "placeholder", "ready"]
+    summary: str
+    configured_sources: list[str]
+    detected_sources: list[str]
+    coverage_count: int
+    total_symbols: int
+    active_symbols: int
+    total_items: int
+    updated_at: str | None = None
+
+
+class DataSourceOverview(BaseModel):
+    current_provider: str
+    fallback_chain: list[str]
+    items: list[DataSourceStatusItem]
+    event_sync: EventSyncOverview
 
 
 class WatchlistCreateRequest(BaseModel):
@@ -363,12 +524,20 @@ class PortfolioPositionItem(BaseModel):
     realized_pnl: float | None = None
     realized_return: float | None = None
     weight_pct: float | None = None
+    risk_level: PortfolioRiskLevel
+    risk_flags: list[str]
     stop_distance_pct: float | None = None
     target_distance_pct: float | None = None
     created_at: str
     opened_at: str | None = None
     closed_at: str | None = None
     updated_at: str
+
+
+class PortfolioIndustryExposure(BaseModel):
+    industry: str
+    market_value: float
+    weight_pct: float
 
 
 class PortfolioSummary(BaseModel):
@@ -383,12 +552,23 @@ class PortfolioSummary(BaseModel):
     realized_pnl: float
     total_return_pct: float
     utilization_pct: float
+    winning_count: int
+    losing_count: int
+    at_risk_position_count: int
+    capital_at_risk: float
+    capital_at_risk_pct: float
+    top_industry: str | None = None
+    top_industry_weight_pct: float | None = None
+    worst_position_name: str | None = None
+    worst_position_return_pct: float | None = None
+    risk_level: PortfolioRiskLevel
     largest_weight_pct: float | None = None
 
 
 class PortfolioOverview(BaseModel):
     profile: PortfolioProfileConfig
     summary: PortfolioSummary
+    industry_exposure: list[PortfolioIndustryExposure]
     positions: list[PortfolioPositionItem]
 
 

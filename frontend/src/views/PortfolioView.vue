@@ -11,9 +11,11 @@ import {
 } from '@/api/market'
 import PageHeader from '@/components/PageHeader.vue'
 import type {
+  PortfolioIndustryExposure,
   PortfolioOverview,
   PortfolioPositionCreateRequest,
   PortfolioPositionItem,
+  PortfolioRiskLevel,
   PortfolioPositionSource,
   PortfolioPositionStatus,
   PortfolioProfileConfig,
@@ -255,6 +257,30 @@ function sourceLabel(source: PortfolioPositionSource) {
   return sourceLabels[source]
 }
 
+function riskLevelLabel(level: PortfolioRiskLevel) {
+  if (level === 'high') {
+    return '高风险'
+  }
+  if (level === 'medium') {
+    return '中风险'
+  }
+  return '低风险'
+}
+
+function riskLevelType(level: PortfolioRiskLevel) {
+  if (level === 'high') {
+    return 'danger'
+  }
+  if (level === 'medium') {
+    return 'warning'
+  }
+  return 'success'
+}
+
+function topIndustryLabel(item: PortfolioIndustryExposure) {
+  return `${item.industry} ${item.weight_pct.toFixed(2)}%`
+}
+
 function normalizeText(value: string | null | undefined) {
   if (!value) {
     return null
@@ -384,6 +410,76 @@ onMounted(() => {
           }}
         </strong>
         <p>帮助你快速看组合有没有出现过度集中。</p>
+      </el-card>
+    </section>
+
+    <section v-if="overview" class="section-grid risk-grid">
+      <el-card class="panel-card">
+        <template #header>
+          <div class="card-head">
+            <span>风控摘要</span>
+            <el-tag :type="riskLevelType(overview.summary.risk_level)" effect="plain">
+              {{ riskLevelLabel(overview.summary.risk_level) }}
+            </el-tag>
+          </div>
+        </template>
+        <div class="summary-list">
+          <div>
+            <span>风险持仓数</span>
+            <strong>{{ overview.summary.at_risk_position_count }}</strong>
+          </div>
+          <div>
+            <span>止损前风险敞口</span>
+            <strong>{{ overview.summary.capital_at_risk.toFixed(2) }}</strong>
+          </div>
+          <div>
+            <span>风险敞口占比</span>
+            <strong>{{ overview.summary.capital_at_risk_pct.toFixed(2) }}%</strong>
+          </div>
+          <div>
+            <span>最弱持仓</span>
+            <strong>
+              {{
+                overview.summary.worst_position_name
+                  ? `${overview.summary.worst_position_name} ${formatPercent(overview.summary.worst_position_return_pct)}`
+                  : '暂无'
+              }}
+            </strong>
+          </div>
+          <div>
+            <span>盈利 / 亏损</span>
+            <strong>{{ overview.summary.winning_count }} / {{ overview.summary.losing_count }}</strong>
+          </div>
+        </div>
+      </el-card>
+
+      <el-card class="panel-card">
+        <template #header>
+          <div class="card-head">
+            <span>行业暴露</span>
+            <span class="hint">
+              {{
+                overview.summary.top_industry
+                  ? `${overview.summary.top_industry} ${overview.summary.top_industry_weight_pct?.toFixed(2)}%`
+                  : '暂无'
+              }}
+            </span>
+          </div>
+        </template>
+        <div v-if="overview.industry_exposure.length" class="industry-list">
+          <div
+            v-for="item in overview.industry_exposure.slice(0, 5)"
+            :key="item.industry"
+            class="industry-item"
+          >
+            <div>
+              <strong>{{ topIndustryLabel(item) }}</strong>
+              <p>对应市值 {{ item.market_value.toFixed(2) }}</p>
+            </div>
+            <el-progress :percentage="Math.min(item.weight_pct, 100)" :show-text="false" :stroke-width="12" />
+          </div>
+        </div>
+        <el-empty v-else description="暂无持有中仓位" />
       </el-card>
     </section>
 
@@ -523,6 +619,13 @@ onMounted(() => {
             </div>
           </template>
         </el-table-column>
+        <el-table-column label="风险等级" width="110">
+          <template #default="{ row }">
+            <el-tag :type="riskLevelType(row.risk_level)" effect="plain">
+              {{ riskLevelLabel(row.risk_level) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="权重" width="100">
           <template #default="{ row }">
             {{ formatPercent(row.weight_pct) }}
@@ -555,6 +658,21 @@ onMounted(() => {
           <template #default="{ row }">
             <div class="tag-wrap">
               <el-tag v-for="tag in row.tags" :key="tag" effect="plain">{{ tag }}</el-tag>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="风险提示" min-width="180">
+          <template #default="{ row }">
+            <div class="tag-wrap">
+              <el-tag
+                v-for="flag in row.risk_flags"
+                :key="flag"
+                :type="row.risk_level === 'high' ? 'danger' : 'warning'"
+                effect="plain"
+              >
+                {{ flag }}
+              </el-tag>
+              <span v-if="row.risk_flags.length === 0" class="small-note">当前无明显风险提示</span>
             </div>
           </template>
         </el-table-column>
@@ -674,6 +792,10 @@ onMounted(() => {
   line-height: 1.65;
 }
 
+.risk-grid {
+  grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.1fr);
+}
+
 .portfolio-grid {
   grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
 }
@@ -714,6 +836,21 @@ onMounted(() => {
 
 .summary-list span {
   color: var(--text-faint);
+}
+
+.industry-list {
+  display: grid;
+  gap: 16px;
+}
+
+.industry-item {
+  display: grid;
+  gap: 10px;
+}
+
+.industry-item p {
+  margin: 6px 0 0;
+  color: var(--text-soft);
 }
 
 .name-block {
@@ -784,6 +921,7 @@ onMounted(() => {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .risk-grid,
   .portfolio-grid {
     grid-template-columns: 1fr;
   }

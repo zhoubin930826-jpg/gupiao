@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import get_market_scope
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.schemas.market import (
@@ -28,10 +29,12 @@ def get_alert_overview(
     category: AlertCategory | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=200),
     db: Session = Depends(get_db),
+    market: str = Depends(get_market_scope),
 ) -> AlertOverview:
     return AlertOverview.model_validate(
         AlertService.build_overview(
             db,
+            market=market,
             status=status,
             severity=severity,
             category=category,
@@ -44,8 +47,10 @@ def get_alert_overview(
 def evaluate_alerts(
     db: Session = Depends(get_db),
     market_store: MarketDataStore = Depends(get_market_store),
+    market: str = Depends(get_market_scope),
 ) -> AlertOverview:
-    return AlertOverview.model_validate(AlertService.refresh_alerts(db, market_store))
+    AlertService.refresh_alerts(db, market_store)
+    return AlertOverview.model_validate(AlertService.build_overview(db, market=market))
 
 
 @router.put("/{alert_id}", response_model=AlertItem)

@@ -30,11 +30,59 @@ export interface MarketPulsePoint {
 export interface DashboardSummary {
   headline: string
   updated_at: string
+  market_context: MarketContextSummary
+  benchmark_indices: BenchmarkIndex[]
+  breadth_snapshot: MarketBreadthSnapshot
+  market_capital_flow: MarketCapitalFlowOverview
   market_overview: MetricCard[]
   hot_industries: IndustryHeat[]
   market_pulse: MarketPulsePoint[]
   top_recommendations: RecommendationItem[]
   risk_flags: string[]
+}
+
+export interface MarketContextSummary {
+  regime: 'risk_on' | 'balanced' | 'risk_off'
+  regime_label: string
+  summary: string
+  action_hint: string
+  watch_points: string[]
+  metrics: MetricCard[]
+}
+
+export interface BenchmarkIndex {
+  code: string
+  name: string
+  latest_price: number
+  change_pct: number
+  return_20d: number | null
+  trend: string
+  takeaway: string
+}
+
+export interface MarketBreadthSnapshot {
+  scope_label: string
+  total_count: number
+  advancers: number
+  decliners: number
+  advance_ratio: number
+  strong_count: number
+  strong_ratio: number
+  avg_change: number
+  avg_turnover: number
+  top_industry: string | null
+  top_two_share: number
+  limit_up_like: number | null
+  limit_down_like: number | null
+  summary: string
+}
+
+export interface MarketCapitalFlowOverview {
+  status: 'ready' | 'derived' | 'placeholder'
+  scope_label: string
+  summary: string
+  watch_points: string[]
+  metrics: MetricCard[]
 }
 
 export interface StockItem {
@@ -75,6 +123,78 @@ export interface SignalBreakdown {
   takeaway: string
 }
 
+export type MoveBias = 'bullish' | 'mixed' | 'cautious'
+
+export interface MoveDriver {
+  title: string
+  detail: string
+  strength: number
+  tone: 'positive' | 'negative'
+}
+
+export interface MoveAnalysis {
+  bias: MoveBias
+  summary: string
+  positive_drivers: MoveDriver[]
+  negative_drivers: MoveDriver[]
+  watch_points: string[]
+}
+
+export type EventTone = 'positive' | 'neutral' | 'caution'
+
+export interface EventItem {
+  date: string | null
+  category: string
+  title: string
+  headline: string
+  detail: string
+  tone: EventTone
+  source: string
+  url: string | null
+}
+
+export interface EventAnalysis {
+  tone: EventTone
+  summary: string
+  tags: string[]
+  items: EventItem[]
+  watch_points: string[]
+}
+
+export type CapitalFlowTone = 'positive' | 'neutral' | 'caution'
+
+export interface CapitalFlowAnalysis {
+  status: 'ready' | 'derived' | 'placeholder'
+  tone: CapitalFlowTone
+  summary: string
+  latest_trade_date: string | null
+  main_net_inflow_1d: number | null
+  main_net_ratio_1d: number | null
+  main_net_inflow_5d: number | null
+  active_days_5d: number | null
+  ultra_large_net_inflow_1d: number | null
+  lhb_on_list_count: number | null
+  lhb_recent_date: string | null
+  lhb_net_buy_amount: number | null
+  watch_points: string[]
+}
+
+export interface RecommendationDiagnosis {
+  is_recommended: boolean
+  current_rank: number
+  total_candidates: number
+  recommendation_limit: number
+  gap_to_limit: number
+  score_gap_to_cutoff: number | null
+  cutoff_symbol: string | null
+  cutoff_name: string | null
+  cutoff_score: number | null
+  summary: string
+  reason_points: string[]
+  blocking_points: string[]
+  action_points: string[]
+}
+
 export interface FundamentalSnapshot {
   report_period: string | null
   revenue_growth: number | null
@@ -93,6 +213,10 @@ export interface StockDetail extends StockItem {
   risk_notes: string[]
   signal_breakdown: SignalBreakdown[]
   fundamental: FundamentalSnapshot | null
+  move_analysis: MoveAnalysis | null
+  event_analysis: EventAnalysis | null
+  capital_flow_analysis: CapitalFlowAnalysis | null
+  recommendation_diagnosis: RecommendationDiagnosis | null
 }
 
 export interface RecommendationItem {
@@ -107,6 +231,10 @@ export interface RecommendationItem {
   latest_price: number | null
   recent_return_5d: number | null
   recent_return_20d: number | null
+  move_bias: MoveBias | null
+  move_summary: string | null
+  event_tone: EventTone | null
+  event_summary: string | null
   in_watchlist: boolean
 }
 
@@ -197,6 +325,41 @@ export interface SyncTask {
   next_run_at: string | null
   message: string
   source: string
+}
+
+export interface DataSourceStatusItem {
+  provider_key: string
+  display_name: string
+  enabled: boolean
+  priority: number
+  supports_snapshot: boolean
+  supports_history: boolean
+  supports_fundamental: boolean
+  last_status: 'idle' | 'success' | 'warning'
+  last_message: string
+  last_run_at: string | null
+  last_success_at: string | null
+  last_failure_at: string | null
+  updated_at: string
+}
+
+export interface EventSyncOverview {
+  status: 'idle' | 'partial' | 'placeholder' | 'ready'
+  summary: string
+  configured_sources: string[]
+  detected_sources: string[]
+  coverage_count: number
+  total_symbols: number
+  active_symbols: number
+  total_items: number
+  updated_at: string | null
+}
+
+export interface DataSourceOverview {
+  current_provider: string
+  fallback_chain: string[]
+  items: DataSourceStatusItem[]
+  event_sync: EventSyncOverview
 }
 
 export type WatchlistStatus = 'watching' | 'holding' | 'archived'
@@ -293,6 +456,7 @@ export interface TradePlanItem {
 
 export type PortfolioPositionStatus = 'holding' | 'closed'
 export type PortfolioPositionSource = 'manual' | 'trade_plan' | 'recommendation' | 'watchlist'
+export type PortfolioRiskLevel = 'low' | 'medium' | 'high'
 
 export interface PortfolioProfileConfig {
   name: string
@@ -351,12 +515,20 @@ export interface PortfolioPositionItem {
   realized_pnl: number | null
   realized_return: number | null
   weight_pct: number | null
+  risk_level: PortfolioRiskLevel
+  risk_flags: string[]
   stop_distance_pct: number | null
   target_distance_pct: number | null
   created_at: string
   opened_at: string | null
   closed_at: string | null
   updated_at: string
+}
+
+export interface PortfolioIndustryExposure {
+  industry: string
+  market_value: number
+  weight_pct: number
 }
 
 export interface PortfolioSummary {
@@ -371,12 +543,23 @@ export interface PortfolioSummary {
   realized_pnl: number
   total_return_pct: number
   utilization_pct: number
+  winning_count: number
+  losing_count: number
+  at_risk_position_count: number
+  capital_at_risk: number
+  capital_at_risk_pct: number
+  top_industry: string | null
+  top_industry_weight_pct: number | null
+  worst_position_name: string | null
+  worst_position_return_pct: number | null
+  risk_level: PortfolioRiskLevel
   largest_weight_pct: number | null
 }
 
 export interface PortfolioOverview {
   profile: PortfolioProfileConfig
   summary: PortfolioSummary
+  industry_exposure: PortfolioIndustryExposure[]
   positions: PortfolioPositionItem[]
 }
 

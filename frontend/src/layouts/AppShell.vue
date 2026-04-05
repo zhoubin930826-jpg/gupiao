@@ -14,6 +14,7 @@ import { computed, onMounted } from 'vue'
 import dayjs from 'dayjs'
 import { useRoute, useRouter } from 'vue-router'
 import { useWorkspaceStore } from '@/stores/workspace'
+import type { MarketScope } from '@/utils/market'
 
 const route = useRoute()
 const router = useRouter()
@@ -34,9 +35,17 @@ const menuItems = [
 
 const pageTitle = computed(() => String(route.meta.title ?? 'Stock Pilot'))
 const todayLabel = computed(() => dayjs().format('YYYY年MM月DD日'))
+const routerViewKey = computed(() => `${workspaceStore.selectedMarket}:${route.fullPath}`)
 
 function openTasksPage() {
   void router.push('/tasks')
+}
+
+function handleMarketChange(nextMarket: string) {
+  workspaceStore.setMarket(nextMarket as MarketScope)
+  if (route.name === 'stock-detail') {
+    void router.replace('/stocks')
+  }
 }
 
 onMounted(() => {
@@ -54,8 +63,25 @@ onMounted(() => {
         <div>
           <p class="eyebrow">本地量化工作台</p>
           <h1>Stock Pilot</h1>
-          <p class="brand-copy">面向个人研究的 A 股数据、评分和推荐系统。</p>
+          <p class="brand-copy">面向个人研究的多市场数据、评分和推荐系统。</p>
         </div>
+      </div>
+
+      <div class="aside-panel market-panel">
+        <span class="panel-label">当前市场</span>
+        <strong>{{ workspaceStore.currentMarketLabel }}</strong>
+        <el-select
+          :model-value="workspaceStore.selectedMarket"
+          size="small"
+          @update:model-value="handleMarketChange"
+        >
+          <el-option
+            v-for="option in workspaceStore.marketOptions"
+            :key="option.value"
+            :label="option.label"
+            :value="option.value"
+          />
+        </el-select>
       </div>
 
       <el-menu :default-active="route.path" class="nav-menu" router>
@@ -82,7 +108,7 @@ onMounted(() => {
     <el-container>
       <el-header class="shell-header">
         <div>
-          <p class="eyebrow page-eyebrow">市场分析系统</p>
+          <p class="eyebrow page-eyebrow">{{ workspaceStore.currentMarketLabel }}分析系统</p>
           <h2>{{ pageTitle }}</h2>
         </div>
 
@@ -95,7 +121,7 @@ onMounted(() => {
       </el-header>
 
       <el-main class="shell-main">
-        <RouterView />
+        <RouterView :key="routerViewKey" />
       </el-main>
     </el-container>
   </el-container>
@@ -184,6 +210,10 @@ onMounted(() => {
   padding: 18px;
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.08);
+}
+
+.market-panel :deep(.el-select) {
+  margin-top: 8px;
 }
 
 .panel-label {

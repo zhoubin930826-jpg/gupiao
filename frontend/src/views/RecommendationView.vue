@@ -10,7 +10,7 @@ import {
   removeFromWatchlist,
 } from '@/api/market'
 import PageHeader from '@/components/PageHeader.vue'
-import type { RecommendationItem, RecommendationJournalItem } from '@/types/market'
+import type { EventTone, MoveBias, RecommendationItem, RecommendationJournalItem } from '@/types/market'
 
 const router = useRouter()
 const loading = ref(false)
@@ -95,6 +95,46 @@ function formatPercent(value: number | null) {
   return `${value.toFixed(2)}%`
 }
 
+function moveBiasLabel(value: MoveBias | null) {
+  if (value === 'bullish') {
+    return '偏多'
+  }
+  if (value === 'cautious') {
+    return '偏谨慎'
+  }
+  return '待确认'
+}
+
+function moveBiasType(value: MoveBias | null) {
+  if (value === 'bullish') {
+    return 'success'
+  }
+  if (value === 'cautious') {
+    return 'danger'
+  }
+  return 'warning'
+}
+
+function eventToneLabel(value: EventTone | null) {
+  if (value === 'positive') {
+    return '催化偏正面'
+  }
+  if (value === 'caution') {
+    return '催化偏谨慎'
+  }
+  return '催化中性'
+}
+
+function eventToneType(value: EventTone | null) {
+  if (value === 'positive') {
+    return 'success'
+  }
+  if (value === 'caution') {
+    return 'danger'
+  }
+  return 'info'
+}
+
 onMounted(() => {
   void loadRecommendations()
 })
@@ -164,6 +204,36 @@ onMounted(() => {
         </div>
 
         <p class="thesis">{{ item.thesis }}</p>
+
+        <div v-if="item.move_summary" class="driver-block">
+          <div class="driver-head">
+            <span class="driver-title">涨跌归因</span>
+            <el-tag
+              v-if="item.move_bias"
+              size="small"
+              effect="dark"
+              :type="moveBiasType(item.move_bias)"
+            >
+              {{ moveBiasLabel(item.move_bias) }}
+            </el-tag>
+          </div>
+          <p>{{ item.move_summary }}</p>
+        </div>
+
+        <div v-if="item.event_summary && item.event_tone !== 'neutral'" class="driver-block event-block">
+          <div class="driver-head">
+            <span class="driver-title">事件层</span>
+            <el-tag
+              v-if="item.event_tone"
+              size="small"
+              effect="dark"
+              :type="eventToneType(item.event_tone)"
+            >
+              {{ eventToneLabel(item.event_tone) }}
+            </el-tag>
+          </div>
+          <p>{{ item.event_summary }}</p>
+        </div>
 
         <div class="meta-grid">
           <div>
@@ -332,7 +402,8 @@ h3 {
 }
 
 .meta-grid span,
-.risk-block span {
+.risk-block span,
+.driver-title {
   display: block;
   color: var(--text-faint);
   margin-bottom: 4px;
@@ -353,6 +424,32 @@ h3 {
   padding: 14px;
   border-radius: 16px;
   background: rgba(234, 88, 12, 0.08);
+}
+
+.driver-block {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 16px;
+  margin-bottom: 16px;
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.event-block {
+  background: rgba(180, 83, 9, 0.08);
+}
+
+.driver-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.driver-block p {
+  margin: 0;
+  color: var(--text-soft);
+  line-height: 1.65;
 }
 
 .risk-block p {

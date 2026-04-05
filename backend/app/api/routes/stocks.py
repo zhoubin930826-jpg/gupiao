@@ -3,10 +3,13 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import get_market_scope
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
-from app.schemas.market import StockDetail, StockListResponse
+from app.schemas.market import StockDetail, StockListResponse, StrategyConfig
 from app.services.market_store import MarketDataStore
+from app.services.recommendation_diagnosis_service import RecommendationDiagnosisService
+from app.services.strategy_service import StrategyService
 from app.services.watchlist_service import WatchlistService
 
 router = APIRouter()
@@ -20,12 +23,13 @@ def get_market_store(settings: Settings = Depends(get_settings)) -> MarketDataSt
 def list_stocks(
     market_store: MarketDataStore = Depends(get_market_store),
     db: Session = Depends(get_db),
+    market: str = Depends(get_market_scope),
     keyword: str | None = None,
     board: str = Query(default="全部"),
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> StockListResponse:
-    payload = market_store.list_stocks(keyword=keyword, board=board, page=page, page_size=page_size)
+    payload = market_store.list_stocks(market=market, keyword=keyword, board=board, page=page, page_size=page_size)
     symbols = [str(row["symbol"]) for row in payload["rows"]]
     watchlist_symbols = WatchlistService.symbols_in_watchlist(db, symbols)
     for row in payload["rows"]:
@@ -38,10 +42,16 @@ def stock_detail(
     symbol: str,
     market_store: MarketDataStore = Depends(get_market_store),
     db: Session = Depends(get_db),
+    market: str = Depends(get_market_scope),
 ) -> StockDetail:
     try:
-        payload = market_store.get_stock_detail(symbol)
+        payload = market_store.get_stock_detail(symbol, market)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"Stock {symbol} not found.") from exc
     payload["in_watchlist"] = symbol in WatchlistService.symbols_in_watchlist(db, [symbol])
+    payload["recommendation_diagnosis"] = RecommendationDiagnosisService.build(
+        detail=payload,
+        ranking=market_store.get_recommendation_context(symbol, market),
+        strategy=StrategyConfig.model_validate(StrategyService.read_config(db, market)),
+    )
     return StockDetail.model_validate(payload)

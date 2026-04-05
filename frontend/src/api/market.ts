@@ -2,6 +2,7 @@ import http from '@/api/http'
 import type {
   AlertItem,
   AlertOverview,
+  DataSourceOverview,
   DashboardSummary,
   HealthStatus,
   PortfolioOverview,
@@ -26,6 +27,12 @@ import type {
 
 export function getHealthStatus() {
   return http.get<HealthStatus>('/health').then((response) => response.data)
+}
+
+export function getDataSourceOverview() {
+  return http
+    .get<DataSourceOverview>('/data-sources/overview')
+    .then((response) => response.data)
 }
 
 export function getAlertOverview(params?: {
