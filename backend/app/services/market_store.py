@@ -17,8 +17,6 @@ from app.services.capital_flow_service import (
     build_placeholder_stock_capital_flow_analysis,
     build_sample_market_capital_flow_overview,
     build_sample_stock_capital_flow_analysis,
-    build_cn_stock_capital_flow_analysis_from_frame,
-    collect_cn_stock_capital_flow_analysis,
 )
 from app.services.sample_market import (
     build_demo_snapshot_records,
@@ -36,6 +34,7 @@ from app.services.market_environment_service import (
 )
 from app.services.market_context_service import build_market_context
 from app.services.move_analysis_service import build_move_analysis
+from app.services.recommendation_trust_service import build_recommendation_trust
 
 
 class MarketDataStore:
@@ -760,7 +759,8 @@ class MarketDataStore:
                     fundamental_json,
                     move_analysis_json,
                     event_analysis_json,
-                    capital_flow_json
+                    capital_flow_json,
+                    updated_at
                 from stock_snapshot
                 where market = ?
                     and symbol = ?
@@ -790,6 +790,7 @@ class MarketDataStore:
                 "move_analysis_json",
                 "event_analysis_json",
                 "capital_flow_json",
+                "snapshot_updated_at",
             ]
             detail = dict(zip(columns, row, strict=True))
             prices = conn.execute(
@@ -831,27 +832,10 @@ class MarketDataStore:
         symbol: str,
         cached_payload: dict[str, object] | None,
     ) -> dict[str, object]:
-        if isinstance(cached_payload, dict) and cached_payload.get("status") == "ready":
+        if isinstance(cached_payload, dict):
             return cached_payload
 
         lhb_row = self._lookup_lhb_row(symbol)
-        try:
-            import akshare as ak
-
-            payload = collect_cn_stock_capital_flow_analysis(ak=ak, symbol=symbol, lhb_row=lhb_row)
-        except Exception:
-            payload = None
-
-        if isinstance(payload, dict) and payload.get("status") == "ready":
-            with self._connect() as conn:
-                conn.execute(
-                    "update stock_snapshot set capital_flow_json = ? where market = ? and symbol = ?",
-                    [dumps_json(payload), "cn", symbol],
-                )
-            return payload
-
-        if isinstance(cached_payload, dict):
-            return cached_payload
         return build_placeholder_stock_capital_flow_analysis(symbol=symbol, lhb_row=lhb_row)
 
     def _lookup_lhb_row(self, symbol: str) -> dict[str, object] | None:
@@ -920,12 +904,18 @@ class MarketDataStore:
                     recommendation_item.thesis,
                     recommendation_item.risk,
                     recommendation_item.tags_json,
+                    recommendation_item.updated_at,
+                    stock_snapshot.signal_breakdown_json,
+                    stock_snapshot.risk_notes_json,
                     stock_snapshot.move_analysis_json,
-                    stock_snapshot.event_analysis_json
+                    stock_snapshot.event_analysis_json,
+                    sync_metadata.source
                 from recommendation_item
                 left join stock_snapshot
                     on recommendation_item.market = stock_snapshot.market
                     and recommendation_item.symbol = stock_snapshot.symbol
+                left join sync_metadata
+                    on recommendation_item.market = sync_metadata.market
                 where recommendation_item.market = ?
                 order by recommendation_item.score desc
                 """
@@ -938,6 +928,10 @@ class MarketDataStore:
         recommendations = []
         for row in rows.to_dict(orient="records"):
             row["tags"] = json.loads(row.pop("tags_json"))
+            signal_breakdown = (
+                json.loads(row.pop("signal_breakdown_json")) if row.get("signal_breakdown_json") else []
+            )
+            risk_notes = json.loads(row.pop("risk_notes_json")) if row.get("risk_notes_json") else []
             move_analysis = json.loads(row.pop("move_analysis_json")) if row.get("move_analysis_json") else None
             event_analysis = json.loads(row.pop("event_analysis_json")) if row.get("event_analysis_json") else None
             metrics = performance.get(str(row["symbol"]), {})
@@ -948,6 +942,13 @@ class MarketDataStore:
             row["move_summary"] = move_analysis.get("summary") if move_analysis else None
             row["event_tone"] = event_analysis.get("tone") if event_analysis else None
             row["event_summary"] = event_analysis.get("summary") if event_analysis else None
+            trust = build_recommendation_trust(
+                source=str(row.pop("source") or "sample"),
+                snapshot_updated_at=str(row.pop("updated_at") or "").replace("T", " "),
+                signal_breakdown=signal_breakdown,
+                risk_notes=[str(item) for item in risk_notes],
+            )
+            row.update(trust)
             recommendations.append(row)
         return recommendations
 
