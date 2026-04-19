@@ -183,7 +183,7 @@ watch(
           {{ detail?.in_watchlist ? '移出自选' : '加入自选' }}
         </el-button>
         <el-button type="primary" plain @click="openTradePlan">加入计划</el-button>
-        <el-button plain @click="loadDetail">刷新个股</el-button>
+        <el-button plain @click="loadDetail">刷新缓存数据</el-button>
       </template>
     </PageHeader>
 
@@ -313,7 +313,9 @@ watch(
               <template #header>
                 <div class="card-head">
                   <span>资金面</span>
-                  <span class="hint">{{ capitalFlowHint(detail.capital_flow_analysis.status) }}</span>
+                  <span class="hint">
+                    {{ capitalFlowHint(detail.capital_flow_analysis.status) }}，基于已同步缓存/占位数据，详情页不会临时联网补抓
+                  </span>
                 </div>
               </template>
               <div class="move-analysis">
@@ -470,6 +472,48 @@ watch(
                     </li>
                   </ul>
                 </div>
+              </div>
+            </el-card>
+
+            <el-card v-if="detail.recommendation_trust" class="panel-card">
+              <template #header>
+                <div class="card-head">
+                  <span>可信度说明</span>
+                  <span class="hint">推荐页与详情页使用同一套口径</span>
+                </div>
+              </template>
+              <div class="diagnosis-block">
+                <div class="move-summary">
+                  <el-tag
+                    :type="detail.recommendation_trust.data_mode === 'live' ? 'success' : 'warning'"
+                    effect="dark"
+                  >
+                    {{ detail.recommendation_trust.data_mode === 'live' ? '真实快照' : '示例快照' }}
+                  </el-tag>
+                  <p>{{ detail.recommendation_trust.confidence_notice }}</p>
+                </div>
+
+                <div class="diagnosis-meta">
+                  <div class="fundamental-item">
+                    <span>可信度分</span>
+                    <strong>{{ detail.recommendation_trust.confidence_score }}</strong>
+                  </div>
+                  <div class="fundamental-item">
+                    <span>快照时间</span>
+                    <strong>{{ detail.recommendation_trust.snapshot_updated_at }}</strong>
+                  </div>
+                </div>
+
+                <ul class="copy-list">
+                  <li
+                    v-for="signal in detail.recommendation_trust.strongest_signals"
+                    :key="signal.dimension"
+                  >
+                    {{ signal.dimension }} {{ signal.score }} 分，{{ signal.takeaway }}
+                  </li>
+                </ul>
+
+                <p>主要风险：{{ detail.recommendation_trust.primary_risk }}</p>
               </div>
             </el-card>
 
