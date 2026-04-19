@@ -9,9 +9,15 @@ import duckdb
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.market_scope import is_a_share_symbol
+from app.core.market_scope import DEFAULT_MARKET_SCOPE, is_a_share_symbol
 from app.models.recommendation import RecommendationJournal
 from app.services.market_store import MarketDataStore
+from app.services.recommendation_tracking_service import (
+    build_price_map,
+    matured_for_window,
+    traded_days_since_publish,
+)
+from app.services.recommendation_trust_service import data_mode_from_source
 
 
 class RecommendationService:
@@ -23,7 +29,8 @@ class RecommendationService:
         generated_at: datetime,
         source: str,
     ) -> None:
-        recommendations = market_store.get_recommendations()
+        market = DEFAULT_MARKET_SCOPE
+        recommendations = market_store.get_recommendations(market=market)
         if not recommendations:
             return
 
@@ -50,7 +57,8 @@ class RecommendationService:
 
     @staticmethod
     def ensure_seed(db: Session, market_store: MarketDataStore) -> None:
-        source = market_store.current_source()
+        market = DEFAULT_MARKET_SCOPE
+        source = market_store.current_source(market=market)
         if source == "sample":
             has_sample_seed = any(
                 is_a_share_symbol(row.symbol)
@@ -93,8 +101,12 @@ class RecommendationService:
             return []
 
         latest_prices = market_store.get_latest_snapshot_map([row.symbol for row in rows])
+        price_map = build_price_map(market_store, [row.symbol for row in rows])
         journal: list[dict[str, object]] = []
         for row in rows:
+            publish_date = row.generated_at.date()
+            price_rows = price_map.get(row.symbol, [])
+            matured = matured_for_window(price_rows, publish_date, row.expected_holding_days)
             current_price = latest_prices.get(row.symbol)
             current_return = None
             if current_price is not None and row.price_at_publish > 0:
@@ -111,10 +123,14 @@ class RecommendationService:
                     "thesis": row.thesis,
                     "risk": row.risk,
                     "source": row.source,
+                    "data_mode": data_mode_from_source(row.source),
                     "tags": json.loads(row.tags_json),
                     "price_at_publish": round(row.price_at_publish, 2),
                     "current_price": round(current_price, 2) if current_price is not None else None,
                     "current_return": current_return,
+                    "days_since_publish": traded_days_since_publish(price_rows, publish_date),
+                    "tracking_status": "matured" if matured else "tracking",
+                    "is_matured_for_expected_window": matured,
                 }
             )
         return journal
@@ -125,7 +141,7 @@ class RecommendationService:
         market_store: MarketDataStore,
     ) -> None:
         market = DEFAULT_MARKET_SCOPE
-        recommendations = market_store.get_recommendations()
+        recommendations = market_store.get_recommendations(market=market)
         if not recommendations:
             return
 
