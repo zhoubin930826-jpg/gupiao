@@ -1,7 +1,10 @@
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.services.recommendation_review_service import RecommendationReviewService
 
 
 @pytest.fixture
@@ -57,6 +60,23 @@ def test_stock_detail_contains_fundamental_snapshot(client: TestClient) -> None:
     assert payload["recommendation_diagnosis"]["is_recommended"] is True
 
 
+def test_stock_detail_exposes_recommendation_trust_summary(client: TestClient) -> None:
+    recommendation_rows = client.get("/api/recommendations").json()
+    assert recommendation_rows
+    symbol = recommendation_rows[0]["symbol"]
+
+    response = client.get(f"/api/stocks/{symbol}")
+    assert response.status_code == 200
+    payload = response.json()
+    trust = payload["recommendation_trust"]
+    assert trust["data_mode"] in {"demo", "live"}
+    assert trust["snapshot_updated_at"]
+    assert len(trust["strongest_signals"]) >= 1
+    assert trust["primary_risk"]
+    assert 20 <= trust["confidence_score"] <= 95
+    assert trust["confidence_notice"]
+
+
 def test_stock_detail_explains_why_not_recommended(client: TestClient) -> None:
     recommendation_rows = client.get("/api/recommendations").json()
     recommended_symbols = {row["symbol"] for row in recommendation_rows}
@@ -88,6 +108,21 @@ def test_recommendations_include_performance(client: TestClient) -> None:
     assert payload[0]["event_tone"] in {"positive", "neutral", "caution"}
 
 
+def test_recommendations_expose_confidence_contract(client: TestClient) -> None:
+    response = client.get("/api/recommendations")
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) > 0
+
+    row = payload[0]
+    assert row["data_mode"] in {"demo", "live"}
+    assert row["snapshot_updated_at"]
+    assert len(row["strongest_signals"]) >= 1
+    assert row["primary_risk"]
+    assert 20 <= row["confidence_score"] <= 95
+    assert row["confidence_notice"]
+
+
 def test_recommendation_journal_exists(client: TestClient) -> None:
     response = client.get("/api/recommendations/journal")
     assert response.status_code == 200
@@ -96,13 +131,265 @@ def test_recommendation_journal_exists(client: TestClient) -> None:
     assert payload[0]["price_at_publish"] > 0
 
 
+def test_recommendation_journal_exposes_data_mode(client: TestClient) -> None:
+    response = client.get("/api/recommendations/journal")
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) > 0
+    assert payload[0]["data_mode"] in {"demo", "live"}
+
+
+def test_recommendation_journal_exposes_tracking_status(client: TestClient) -> None:
+    response = client.get("/api/recommendations/journal")
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) > 0
+
+    row = payload[0]
+    assert isinstance(row["days_since_publish"], int)
+    assert row["tracking_status"] in {"tracking", "matured"}
+    assert row["is_matured_for_expected_window"] is (row["tracking_status"] == "matured")
+
+
 def test_recommendation_review_exists(client: TestClient) -> None:
     response = client.get("/api/recommendations/review")
     assert response.status_code == 200
     payload = response.json()
     assert payload["total_samples"] > 0
     assert len(payload["window_metrics"]) == 3
-    assert any(item["sample_size"] > 0 for item in payload["window_metrics"])
+    assert len(payload["samples"]) == payload["total_samples"]
+    assert all(item["data_mode"] == payload["evaluation_mode"] for item in payload["samples"])
+    assert any(item["sample_size"] > 0 for item in payload["mode_breakdown"])
+
+
+def test_recommendation_review_exposes_evaluation_scope(client: TestClient) -> None:
+    response = client.get("/api/recommendations/review")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["evaluation_mode"] in {"demo", "live"}
+    assert payload["evaluation_notice"]
+    assert len(payload["mode_breakdown"]) >= 1
+
+
+def test_recommendation_review_exposes_trust_level_and_maturity(client: TestClient) -> None:
+    response = client.get("/api/recommendations/review")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["trust_level"] in {"low", "medium", "high"}
+    assert len(payload["trust_reasons"]) >= 2
+    assert {item["window_days"] for item in payload["maturity_breakdown"]} == {5, 10, 20}
+    assert all(
+        item["matured_samples"] + item["immature_samples"] == item["total_samples"]
+        for item in payload["maturity_breakdown"]
+    )
+
+
+def test_recommendation_review_prefers_live_before_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeQuery:
+        def __init__(self, rows: list[object]) -> None:
+            self._rows = rows
+
+        def order_by(self, *args: object) -> "FakeQuery":
+            return self
+
+        def all(self) -> list[object]:
+            return self._rows
+
+    class FakeSession:
+        def __init__(self, rows: list[object]) -> None:
+            self._rows = rows
+
+        def query(self, model: object) -> FakeQuery:
+            return FakeQuery(self._rows)
+
+    class FakeRow:
+        def __init__(self, run_key: str, source: str, symbol: str) -> None:
+            self.run_key = run_key
+            self.source = source
+            self.symbol = symbol
+            self.generated_at = "2026-04-19T10:00:00"
+            self.id = 1
+            self.name = symbol
+            self.score = 80
+            self.entry_window = "watch"
+            self.expected_holding_days = 5
+            self.thesis = "thesis"
+            self.tags_json = "[]"
+            self.price_at_publish = 10.0
+
+    rows = [
+        FakeRow("demo-new-1", "sample", "000001"),
+        FakeRow("demo-new-2", "sample", "000002"),
+        FakeRow("live-old-1", "akshare-live", "000003"),
+    ]
+
+    monkeypatch.setattr(
+        "app.services.recommendation_review_service.is_a_share_symbol",
+        lambda symbol: True,
+    )
+    monkeypatch.setattr(
+        RecommendationReviewService,
+        "_build_price_map",
+        staticmethod(lambda market_store, symbols: {}),
+    )
+    monkeypatch.setattr(
+        RecommendationReviewService,
+        "_serialize_row",
+        classmethod(
+            lambda cls, row, price_rows: {
+                "run_key": row.run_key,
+                "generated_at": row.generated_at,
+                "symbol": row.symbol,
+                "name": row.name,
+                "score": row.score,
+                "source": row.source,
+                "data_mode": "demo" if str(row.source).startswith("sample") else "live",
+                "entry_window": row.entry_window,
+                "expected_holding_days": row.expected_holding_days,
+                "thesis": row.thesis,
+                "tags": [],
+                "price_at_publish": row.price_at_publish,
+                "latest_known_price": None,
+                "return_5d": None,
+                "return_10d": None,
+                "return_20d": None,
+                "expected_return": None,
+            }
+        ),
+    )
+
+    payload = RecommendationReviewService.build_review(FakeSession(rows), object(), limit=2)
+
+    assert payload["evaluation_mode"] == "live"
+    assert payload["mode_breakdown"] == [
+        {"mode": "live", "sample_size": 1},
+        {"mode": "demo", "sample_size": 2},
+    ]
+    assert "仅用于流程演示" in payload["evaluation_notice"]
+    assert "不参与本次指标计算" in payload["evaluation_notice"]
+    assert payload["total_samples"] == 1
+    assert [item["run_key"] for item in payload["samples"]] == ["live-old-1"]
+
+
+def test_recommendation_review_low_trust_when_live_samples_are_still_thin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeQuery:
+        def __init__(self, rows: list[object]) -> None:
+            self._rows = rows
+
+        def order_by(self, *args: object) -> "FakeQuery":
+            return self
+
+        def all(self) -> list[object]:
+            return self._rows
+
+    class FakeSession:
+        def __init__(self, rows: list[object]) -> None:
+            self._rows = rows
+
+        def query(self, model: object) -> FakeQuery:
+            return FakeQuery(self._rows)
+
+    class FakeRow:
+        def __init__(self, run_key: str, source: str, symbol: str) -> None:
+            self.run_key = run_key
+            self.source = source
+            self.symbol = symbol
+            self.generated_at = __import__("datetime").datetime.fromisoformat("2026-04-19T10:00:00")
+            self.id = 1
+            self.name = symbol
+            self.score = 80
+            self.entry_window = "watch"
+            self.expected_holding_days = 5
+            self.thesis = "thesis"
+            self.tags_json = "[]"
+            self.price_at_publish = 10.0
+
+    rows = [
+        FakeRow("demo-new-1", "sample", "000001"),
+        FakeRow("demo-new-2", "sample", "000002"),
+        FakeRow("live-old-1", "akshare-live", "000003"),
+    ]
+
+    monkeypatch.setattr(
+        "app.services.recommendation_review_service.is_a_share_symbol",
+        lambda symbol: True,
+    )
+    monkeypatch.setattr(
+        "app.services.recommendation_review_service.build_price_map",
+        lambda market_store, symbols: {
+            "000003": [
+                ("2026-04-21", 10.0),
+                ("2026-04-22", 10.1),
+                ("2026-04-23", 10.2),
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        RecommendationReviewService,
+        "_serialize_row",
+        classmethod(
+            lambda cls, row, price_rows: {
+                "run_key": row.run_key,
+                "generated_at": row.generated_at.isoformat(timespec="seconds"),
+                "symbol": row.symbol,
+                "name": row.name,
+                "score": row.score,
+                "source": row.source,
+                "data_mode": "demo" if str(row.source).startswith("sample") else "live",
+                "entry_window": row.entry_window,
+                "expected_holding_days": row.expected_holding_days,
+                "thesis": row.thesis,
+                "tags": [],
+                "price_at_publish": row.price_at_publish,
+                "latest_known_price": None,
+                "return_5d": None,
+                "return_10d": None,
+                "return_20d": None,
+                "expected_return": None,
+            }
+        ),
+    )
+
+    payload = RecommendationReviewService.build_review(FakeSession(rows), object(), limit=2)
+
+    assert payload["trust_level"] == "low"
+    assert len(payload["trust_reasons"]) >= 2
+    maturity = {item["window_days"]: item for item in payload["maturity_breakdown"]}
+    assert maturity[20]["matured_samples"] == 0
+
+
+def test_recommendation_view_keeps_stats_trust_aware() -> None:
+    source = Path("frontend/src/views/RecommendationView.vue").read_text(encoding="utf-8")
+
+    assert "journalStatsRows" in source
+    assert "journalStatsMode" in source
+    assert "当前统计仅基于真实记录" in source
+    assert "这些示例记录只用于流程演示，不计入上方三项统计" in source
+
+
+def test_recommendation_view_mentions_tracking_snapshot_copy() -> None:
+    source = Path("frontend/src/views/RecommendationView.vue").read_text(encoding="utf-8")
+
+    assert "运行中跟踪快照" in source
+    assert "confidence_notice" in source
+    assert "is_matured_for_expected_window" in source
+
+
+def test_review_view_mentions_trust_level_and_maturity_breakdown() -> None:
+    source = Path("frontend/src/views/ReviewView.vue").read_text(encoding="utf-8")
+
+    assert "trust_level" in source
+    assert "trust_reasons" in source
+    assert "maturity_breakdown" in source
+
+
+def test_stock_detail_view_mentions_recommendation_trust_summary() -> None:
+    source = Path("frontend/src/views/StockDetailView.vue").read_text(encoding="utf-8")
+
+    assert "recommendation_trust" in source
+    assert "可信度说明" in source
 
 
 def test_dashboard_contains_market_context(client: TestClient) -> None:
