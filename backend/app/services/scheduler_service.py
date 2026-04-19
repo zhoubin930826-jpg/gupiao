@@ -5,7 +5,7 @@ from apscheduler.triggers.cron import CronTrigger
 from zoneinfo import ZoneInfo
 
 from app.core.config import get_settings
-from app.core.market_scope import SUPPORTED_MARKETS
+from app.core.market_scope import DEFAULT_MARKET_SCOPE
 from app.services.task_service import TaskService
 
 
@@ -28,19 +28,18 @@ class TaskScheduler:
         if not self.settings.enable_task_scheduler:
             return
 
-        for market in SUPPORTED_MARKETS:
-            hour, minute = TaskService._schedule_map(market)["market-sync"]
-            self.scheduler.add_job(
-                TaskService.run_market_sync_job,
-                kwargs={"market": market},
-                trigger=CronTrigger(
-                    hour=hour,
-                    minute=minute,
-                    timezone=self.timezone,
-                ),
-                id=f"{market}-market-sync",
-                replace_existing=True,
-            )
+        hour, minute = TaskService._schedule_map(DEFAULT_MARKET_SCOPE)["market-sync"]
+        self.scheduler.add_job(
+            TaskService.run_market_sync_job,
+            kwargs={"market": DEFAULT_MARKET_SCOPE},
+            trigger=CronTrigger(
+                hour=hour,
+                minute=minute,
+                timezone=self.timezone,
+            ),
+            id="cn-market-sync",
+            replace_existing=True,
+        )
         self.scheduler.start()
         self.started = True
         TaskService.sync_task_plans()

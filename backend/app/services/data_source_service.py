@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.market_scope import DEFAULT_MARKET_SCOPE, normalize_market_scope, scoped_key, unscoped_key
+from app.core.market_scope import DEFAULT_MARKET_SCOPE, scoped_key, unscoped_key
 from app.models.data_source import DataSourceStatus
 from app.services.market_store import MarketDataStore
 
@@ -26,8 +26,7 @@ class DataSourceDescriptor:
 class DataSourceService:
     @classmethod
     def sync_catalog(cls, db: Session, market: str = DEFAULT_MARKET_SCOPE) -> list[DataSourceStatus]:
-        normalized_market = normalize_market_scope(market)
-        descriptors = cls.catalog(normalized_market)
+        descriptors = cls.catalog(DEFAULT_MARKET_SCOPE)
         existing = {
             row.provider_key: row
             for row in db.query(DataSourceStatus).all()
@@ -35,7 +34,7 @@ class DataSourceService:
         synced_rows: list[DataSourceStatus] = []
         changed = False
         for descriptor in descriptors:
-            scoped_provider_key = scoped_key(normalized_market, descriptor.provider_key)
+            scoped_provider_key = scoped_key(DEFAULT_MARKET_SCOPE, descriptor.provider_key)
             row = existing.get(scoped_provider_key)
             if row is None:
                 row = DataSourceStatus(
@@ -64,7 +63,6 @@ class DataSourceService:
     @classmethod
     def catalog(cls, market: str = DEFAULT_MARKET_SCOPE) -> list[DataSourceDescriptor]:
         settings = get_settings()
-        normalized_market = normalize_market_scope(market)
         descriptors = [
             DataSourceDescriptor(
                 provider_key="akshare",
@@ -90,9 +88,8 @@ class DataSourceService:
     @classmethod
     def resolve_order(cls, market: str = DEFAULT_MARKET_SCOPE) -> list[str]:
         settings = get_settings()
-        normalized_market = normalize_market_scope(market)
         preferred = [provider.strip().lower() for provider in settings.market_data_provider_order if provider.strip()]
-        available = {item.provider_key for item in cls.catalog(normalized_market) if item.enabled}
+        available = {item.provider_key for item in cls.catalog(DEFAULT_MARKET_SCOPE) if item.enabled}
         order = [provider for provider in preferred if provider in available]
         if "sample" not in order:
             order.append("sample")
@@ -109,12 +106,11 @@ class DataSourceService:
         message: str,
         at: datetime | None = None,
     ) -> DataSourceStatus:
-        normalized_market = normalize_market_scope(market)
-        row = db.query(DataSourceStatus).filter_by(provider_key=scoped_key(normalized_market, provider_key)).first()
+        row = db.query(DataSourceStatus).filter_by(provider_key=scoped_key(DEFAULT_MARKET_SCOPE, provider_key)).first()
         if row is None:
-            cls.sync_catalog(db, normalized_market)
+            cls.sync_catalog(db, DEFAULT_MARKET_SCOPE)
             row = db.query(DataSourceStatus).filter_by(
-                provider_key=scoped_key(normalized_market, provider_key)
+                provider_key=scoped_key(DEFAULT_MARKET_SCOPE, provider_key)
             ).first()
         if row is None:
             raise KeyError(provider_key)
@@ -137,17 +133,16 @@ class DataSourceService:
         cls,
         db: Session,
         *,
-        market: str,
         current_provider: str,
         fallback_chain: list[str],
         market_store: MarketDataStore,
     ) -> dict[str, object]:
-        rows = cls.sync_catalog(db, market)
+        rows = cls.sync_catalog(db, DEFAULT_MARKET_SCOPE)
         return {
             "current_provider": cls.provider_key_from_source(current_provider),
             "fallback_chain": fallback_chain,
             "items": [cls._serialize(row) for row in rows],
-            "event_sync": market_store.get_event_sync_overview(market),
+            "event_sync": market_store.get_event_sync_overview(),
         }
 
     @staticmethod

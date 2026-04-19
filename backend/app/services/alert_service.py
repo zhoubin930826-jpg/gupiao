@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.market_scope import DEFAULT_MARKET_SCOPE, SUPPORTED_MARKETS, infer_market_from_symbol, normalize_market_scope
+from app.core.market_scope import is_a_share_symbol
 from app.models.alert import AlertEvent
 from app.models.portfolio import PortfolioPosition
 from app.models.trade_plan import TradePlanEntry
@@ -79,13 +79,11 @@ class AlertService:
         cls,
         db: Session,
         *,
-        market: str = DEFAULT_MARKET_SCOPE,
         status: str | None = None,
         severity: str | None = None,
         category: str | None = None,
         limit: int = 100,
     ) -> dict[str, object]:
-        normalized_market = normalize_market_scope(market)
         rows = db.query(AlertEvent).all()
         serialized = [cls._serialize(row) for row in rows]
         serialized.sort(key=lambda item: item["updated_at"], reverse=True)
@@ -95,7 +93,7 @@ class AlertService:
         filtered = [
             item
             for item in serialized
-            if (item["symbol"] is None or infer_market_from_symbol(item["symbol"]) == normalized_market)
+            if (item["symbol"] is None or is_a_share_symbol(item["symbol"]))
             and (status is None or item["status"] == status)
             and (severity is None or item["severity"] == severity)
             and (category is None or item["category"] == category)
@@ -181,10 +179,9 @@ class AlertService:
         market_store: MarketDataStore,
     ) -> list[dict[str, object]]:
         candidates: list[dict[str, object]] = []
-        for market in SUPPORTED_MARKETS:
-            candidates.extend(cls._trade_plan_candidates(db, market_store, market=market))
-            candidates.extend(cls._portfolio_candidates(db, market_store, market=market))
-            candidates.extend(cls._watchlist_candidates(db, market_store, market=market))
+        candidates.extend(cls._trade_plan_candidates(db, market_store))
+        candidates.extend(cls._portfolio_candidates(db, market_store))
+        candidates.extend(cls._watchlist_candidates(db, market_store))
         return candidates
 
     @classmethod
@@ -192,10 +189,8 @@ class AlertService:
         cls,
         db: Session,
         market_store: MarketDataStore,
-        *,
-        market: str = DEFAULT_MARKET_SCOPE,
     ) -> list[dict[str, object]]:
-        rows = TradePlanService.list_items(db, market_store, market=market)
+        rows = TradePlanService.list_items(db, market_store)
         candidates: list[dict[str, object]] = []
         for item in rows:
             latest_price = _optional_float(item.get("latest_price"))
@@ -294,10 +289,8 @@ class AlertService:
         cls,
         db: Session,
         market_store: MarketDataStore,
-        *,
-        market: str = DEFAULT_MARKET_SCOPE,
     ) -> list[dict[str, object]]:
-        overview = PortfolioService.build_overview(db, market_store, market=market)
+        overview = PortfolioService.build_overview(db, market_store)
         candidates: list[dict[str, object]] = []
         for item in overview["positions"]:
             if item["status"] != "holding":
@@ -395,10 +388,8 @@ class AlertService:
         cls,
         db: Session,
         market_store: MarketDataStore,
-        *,
-        market: str = DEFAULT_MARKET_SCOPE,
     ) -> list[dict[str, object]]:
-        rows = WatchlistService.list_items(db, market_store, market=market)
+        rows = WatchlistService.list_items(db, market_store)
         candidates: list[dict[str, object]] = []
         for item in rows:
             if item["status"] != "watching":

@@ -1,12 +1,11 @@
 import json
 import math
 import random
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from app.core.config import get_settings
-from app.core.market_scope import market_long_label, normalize_market_scope
 
 
 @dataclass(frozen=True)
@@ -346,124 +345,6 @@ DEMO_STOCKS: tuple[DemoStock, ...] = (
     ),
 )
 
-MARKET_ALIASES: dict[str, tuple[dict[str, object], ...]] = {
-    "hk": (
-        {"symbol": "0700.HK", "name": "腾讯控股", "board": "港股主板", "industry": "互联网平台", "theme": "平台经济", "price_multiplier": 3.2, "pe_multiplier": 1.15, "market_cap_multiplier": 1.55, "score_delta": 0},
-        {"symbol": "9988.HK", "name": "阿里巴巴-W", "board": "港股主板", "industry": "电商平台", "theme": "平台修复", "price_multiplier": 1.7, "pe_multiplier": 0.9, "market_cap_multiplier": 0.85, "score_delta": -2},
-        {"symbol": "3690.HK", "name": "美团-W", "board": "港股主板", "industry": "本地生活", "theme": "消费互联网", "price_multiplier": 0.55, "pe_multiplier": 1.1, "market_cap_multiplier": 0.95, "score_delta": -1},
-        {"symbol": "1810.HK", "name": "小米集团-W", "board": "港股主板", "industry": "消费电子", "theme": "硬件生态", "price_multiplier": 0.08, "pe_multiplier": 1.05, "market_cap_multiplier": 0.35, "score_delta": 1},
-        {"symbol": "1211.HK", "name": "比亚迪股份", "board": "港股主板", "industry": "新能源车", "theme": "整车龙头", "price_multiplier": 0.95, "pe_multiplier": 1.0, "market_cap_multiplier": 1.2, "score_delta": 1},
-        {"symbol": "0388.HK", "name": "香港交易所", "board": "港股主板", "industry": "交易所", "theme": "金融基础设施", "price_multiplier": 0.15, "pe_multiplier": 1.2, "market_cap_multiplier": 0.65, "score_delta": 0},
-        {"symbol": "2318.HK", "name": "中国平安", "board": "港股主板", "industry": "保险", "theme": "金融蓝筹", "price_multiplier": 0.22, "pe_multiplier": 0.82, "market_cap_multiplier": 0.8, "score_delta": -1},
-        {"symbol": "1299.HK", "name": "友邦保险", "board": "港股主板", "industry": "保险", "theme": "高确定性", "price_multiplier": 0.03, "pe_multiplier": 0.92, "market_cap_multiplier": 0.75, "score_delta": 0},
-        {"symbol": "9618.HK", "name": "京东集团-SW", "board": "港股主板", "industry": "电商平台", "theme": "消费互联网", "price_multiplier": 1.2, "pe_multiplier": 0.88, "market_cap_multiplier": 0.45, "score_delta": 1},
-        {"symbol": "9888.HK", "name": "百度集团-SW", "board": "港股主板", "industry": "AI 平台", "theme": "AI 平台", "price_multiplier": 0.55, "pe_multiplier": 0.86, "market_cap_multiplier": 0.38, "score_delta": 2},
-    ),
-    "us": (
-        {"symbol": "NVDA", "name": "英伟达", "board": "NASDAQ", "industry": "AI 芯片", "theme": "AI 算力", "price_multiplier": 5.6, "pe_multiplier": 1.35, "market_cap_multiplier": 2.35, "score_delta": 3},
-        {"symbol": "AAPL", "name": "苹果", "board": "NASDAQ", "industry": "消费电子", "theme": "核心资产", "price_multiplier": 1.15, "pe_multiplier": 0.62, "market_cap_multiplier": 1.15, "score_delta": 0},
-        {"symbol": "MSFT", "name": "微软", "board": "NASDAQ", "industry": "云软件", "theme": "云计算", "price_multiplier": 1.75, "pe_multiplier": 1.45, "market_cap_multiplier": 1.25, "score_delta": 2},
-        {"symbol": "AMZN", "name": "亚马逊", "board": "NASDAQ", "industry": "云计算", "theme": "云与零售", "price_multiplier": 0.88, "pe_multiplier": 2.6, "market_cap_multiplier": 1.1, "score_delta": 1},
-        {"symbol": "META", "name": "Meta", "board": "NASDAQ", "industry": "社交广告", "theme": "广告平台", "price_multiplier": 2.25, "pe_multiplier": 1.18, "market_cap_multiplier": 1.1, "score_delta": 2},
-        {"symbol": "GOOGL", "name": "Alphabet", "board": "NASDAQ", "industry": "互联网平台", "theme": "AI 平台", "price_multiplier": 0.1, "pe_multiplier": 1.08, "market_cap_multiplier": 0.95, "score_delta": 1},
-        {"symbol": "TSLA", "name": "特斯拉", "board": "NASDAQ", "industry": "新能源车", "theme": "高弹性龙头", "price_multiplier": 1.05, "pe_multiplier": 3.0, "market_cap_multiplier": 0.95, "score_delta": 0},
-        {"symbol": "AMD", "name": "AMD", "board": "NASDAQ", "industry": "半导体", "theme": "芯片弹性", "price_multiplier": 0.72, "pe_multiplier": 1.85, "market_cap_multiplier": 0.42, "score_delta": 2},
-        {"symbol": "NFLX", "name": "奈飞", "board": "NASDAQ", "industry": "流媒体", "theme": "内容平台", "price_multiplier": 9.2, "pe_multiplier": 1.95, "market_cap_multiplier": 0.55, "score_delta": 1},
-        {"symbol": "PLTR", "name": "Palantir", "board": "NYSE", "industry": "数据智能", "theme": "数据智能", "price_multiplier": 0.12, "pe_multiplier": 3.2, "market_cap_multiplier": 0.08, "score_delta": 4},
-    ),
-}
-
-
-def _marketized_demo_stocks(market: str) -> tuple[DemoStock, ...]:
-    normalized = normalize_market_scope(market)
-    if normalized == "cn":
-        return DEMO_STOCKS
-
-    aliases = MARKET_ALIASES[normalized]
-    market_name = market_long_label(normalized)
-    transformed: list[DemoStock] = []
-    for base, alias in zip(DEMO_STOCKS, aliases, strict=True):
-        score = _bounded_score(base.score + int(alias.get("score_delta", 0)))
-        theme = str(alias["theme"])
-        industry = str(alias["industry"])
-        transformed.append(
-            replace(
-                base,
-                symbol=str(alias["symbol"]),
-                name=str(alias["name"]),
-                board=str(alias["board"]),
-                industry=industry,
-                latest_price=round(base.latest_price * float(alias.get("price_multiplier", 1.0)), 2),
-                change_pct=round(base.change_pct * (0.86 if normalized == "hk" else 1.12), 2),
-                turnover_ratio=round(max(0.8, base.turnover_ratio * (0.92 if normalized == "hk" else 0.78)), 2),
-                pe_ttm=round(max(6.0, base.pe_ttm * float(alias.get("pe_multiplier", 1.0))), 1),
-                market_cap=round(base.market_cap * float(alias.get("market_cap_multiplier", 1.0)), 1),
-                score=score,
-                thesis=f"{alias['name']} 在 {theme} 方向具备较高辨识度，当前适合放进 {market_name} 候选池继续复核。",
-                tags=(_market_tag(normalized), theme, "高分候选" if score >= 85 else "核心观察"),
-                thesis_points=_market_thesis_points(alias_name=str(alias["name"]), market_name=market_name, theme=theme),
-                risk_notes=_market_risk_notes(market_name=market_name, industry=industry),
-                risk=f"{market_name} 中这类 {industry} 标的波动不小，适合先看节奏再谈仓位。",
-                entry_window="放量确认后跟踪" if score >= 85 else "回踩均线时观察",
-                expected_holding_days=max(6, base.expected_holding_days - (1 if normalized == "hk" else 0)),
-                signal_breakdown=_market_signal_breakdown(
-                    score=score,
-                    market_name=market_name,
-                    theme=theme,
-                    industry=industry,
-                ),
-            )
-        )
-    return tuple(transformed)
-
-
-def _market_tag(market: str) -> str:
-    if market == "hk":
-        return "港股"
-    if market == "us":
-        return "美股"
-    return "A股"
-
-
-def _market_thesis_points(
-    *,
-    alias_name: str,
-    market_name: str,
-    theme: str,
-) -> tuple[str, ...]:
-    return (
-        f"{alias_name} 在 {theme} 主线里辨识度较高，适合放进 {market_name} 前排候选。",
-        f"{market_name} 下更看重节奏和预期差，强弱最好结合量价再确认。",
-        "如果后续评分继续抬升，这类核心标的更适合作为重点复核对象。",
-    )
-
-
-def _market_risk_notes(*, market_name: str, industry: str) -> tuple[str, ...]:
-    return (
-        f"{market_name} 中 {industry} 方向容易受外部流动性和行业预期变化影响。",
-        "高分只代表更值得优先复核，不代表回撤会更小。",
-    )
-
-
-def _market_signal_breakdown(
-    *,
-    score: int,
-    market_name: str,
-    theme: str,
-    industry: str,
-) -> tuple[tuple[str, int, str], ...]:
-    technical = _bounded_score(score + 2)
-    fundamental = _bounded_score(score - 4)
-    money_flow = _bounded_score(score + 1)
-    sentiment = _bounded_score(score)
-    return (
-        ("技术面", technical, f"{market_name} 下价格结构保持稳定，适合继续看是否顺势延续。"),
-        ("基本面", fundamental, f"{industry} 逻辑还在，但估值和兑现速度都需要继续确认。"),
-        ("资金面", money_flow, "成交承接尚可，更适合和趋势共振时参与。"),
-        ("情绪面", sentiment, f"{theme} 主题仍有辨识度，但短线情绪波动也会更快。"),
-    )
-
-
 def _bounded_score(value: int) -> int:
     return max(68, min(95, int(value)))
 
@@ -485,7 +366,7 @@ def _trading_days(count: int) -> list[datetime]:
 
 def build_demo_snapshot_records(market: str = "cn") -> list[dict[str, object]]:
     updated_at = datetime.now(_settings_timezone())
-    stocks = _marketized_demo_stocks(market)
+    stocks = DEMO_STOCKS
     return [
         {
             "symbol": stock.symbol,

@@ -9,9 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.market_scope import (
     DEFAULT_MARKET_SCOPE,
-    SUPPORTED_MARKETS,
     market_label,
-    normalize_market_scope,
     scoped_key,
     unscoped_key,
 )
@@ -36,20 +34,18 @@ class TaskService:
         self.settings = get_settings()
 
     def list_tasks(self, market: str = DEFAULT_MARKET_SCOPE) -> list[dict[str, object]]:
-        normalized_market = normalize_market_scope(market)
         rows = [
             row
             for row in self.db.query(SyncTaskRecord).order_by(SyncTaskRecord.id.asc()).all()
-            if row.task_key.startswith(f"{normalized_market}:")
+            if row.task_key.startswith(f"{DEFAULT_MARKET_SCOPE}:")
         ]
         return [self._serialize_task(row) for row in rows]
 
     def prepare_market_sync(self, market: str = DEFAULT_MARKET_SCOPE) -> tuple[dict[str, object], bool]:
-        normalized_market = normalize_market_scope(market)
         timezone = ZoneInfo(self.settings.app_timezone)
         now = datetime.now(timezone)
         task = self.db.query(SyncTaskRecord).filter_by(
-            task_key=scoped_key(normalized_market, "market-sync")
+            task_key=scoped_key(DEFAULT_MARKET_SCOPE, "market-sync")
         ).first()
         if task is None:
             raise RuntimeError("Market sync task missing.")
@@ -58,8 +54,8 @@ class TaskService:
             return self._serialize_task(task), False
 
         task.status = "running"
-        task.message = f"任务已提交，后台正在同步 {market_label(normalized_market)} 数据..."
-        task.source = self.market_store.current_source(normalized_market)
+        task.message = f"任务已提交，后台正在同步 {market_label(DEFAULT_MARKET_SCOPE)} 数据..."
+        task.source = self.market_store.current_source()
         task.last_run_at = now
         self.db.add(task)
         self.db.commit()
@@ -87,59 +83,56 @@ class TaskService:
 
         session = SessionLocal()
         try:
-            for market in SUPPORTED_MARKETS:
-                normalized_market = normalize_market_scope(market)
-                DataSourceService.sync_catalog(session, normalized_market)
-                market_schedule = cls._schedule_map(normalized_market)
-                for task_key, plan in market_schedule.items():
-                    row = session.query(SyncTaskRecord).filter_by(
-                        task_key=scoped_key(normalized_market, task_key)
-                    ).first()
-                    if row is None:
-                        continue
+            DataSourceService.sync_catalog(session, DEFAULT_MARKET_SCOPE)
+            market_schedule = cls._schedule_map(DEFAULT_MARKET_SCOPE)
+            for task_key, plan in market_schedule.items():
+                row = session.query(SyncTaskRecord).filter_by(
+                    task_key=scoped_key(DEFAULT_MARKET_SCOPE, task_key)
+                ).first()
+                if row is None:
+                    continue
 
-                    hour, minute = plan
-                    row.schedule = cls._schedule_label(hour, minute)
-                    if row.status != "running":
-                        row.next_run_at = (
-                            cls._next_occurrence(hour=hour, minute=minute, now=now, timezone=timezone)
-                            if settings.enable_task_scheduler
-                            else None
-                        )
-                    session.add(row)
+                hour, minute = plan
+                row.schedule = cls._schedule_label(hour, minute)
+                if row.status != "running":
+                    row.next_run_at = (
+                        cls._next_occurrence(hour=hour, minute=minute, now=now, timezone=timezone)
+                        if settings.enable_task_scheduler
+                        else None
+                    )
+                session.add(row)
             session.commit()
         finally:
             session.close()
 
     def _perform_market_sync(self, market: str = DEFAULT_MARKET_SCOPE) -> None:
-        normalized_market = normalize_market_scope(market)
         timezone = ZoneInfo(self.settings.app_timezone)
         now = datetime.now(timezone)
         task = self.db.query(SyncTaskRecord).filter_by(
-            task_key=scoped_key(normalized_market, "market-sync")
+            task_key=scoped_key(DEFAULT_MARKET_SCOPE, "market-sync")
         ).first()
         if task is None:
             raise RuntimeError("Market sync task missing.")
 
         task.status = "running"
-        task.message = f"正在刷新 {market_label(normalized_market)} 市场数据..."
+        task.message = f"正在刷新 {market_label(DEFAULT_MARKET_SCOPE)} 市场数据..."
         self.db.add(task)
         self.db.commit()
 
-        DataSourceService.sync_catalog(self.db, normalized_market)
-        profile = StrategyService.read_config(self.db, normalized_market)
+        DataSourceService.sync_catalog(self.db, DEFAULT_MARKET_SCOPE)
+        profile = StrategyService.read_config(self.db)
         strategy = StrategyWeights.from_mapping(profile.__dict__)
         source = "sample"
         final_status = "success"
-        final_message = f"已刷新 {market_label(normalized_market)} 示例数据。"
-        provider_order = DataSourceService.resolve_order(normalized_market)
+        final_message = f"已刷新 {market_label(DEFAULT_MARKET_SCOPE)} 示例数据。"
+        provider_order = DataSourceService.resolve_order(DEFAULT_MARKET_SCOPE)
         warning_messages: list[str] = []
 
         for provider_key in provider_order:
             result = self._run_provider(
                 provider_key=provider_key,
                 strategy=strategy,
-                market=normalized_market,
+                market=DEFAULT_MARKET_SCOPE,
             )
             if result.success:
                 source = result.source_label
@@ -147,7 +140,7 @@ class TaskService:
                     self.market_store.refresh_snapshot_records(
                         result.dataset.snapshot_records,
                         source=result.source_label,
-                        market=normalized_market,
+                        market=DEFAULT_MARKET_SCOPE,
                         history_rows=result.dataset.history_rows,
                         benchmark_rows=result.dataset.benchmark_records,
                         breadth_snapshot=result.dataset.breadth_snapshot,
@@ -157,28 +150,28 @@ class TaskService:
                     final_message = result.message
                     final_status = "success"
                 else:
-                    self.market_store.seed_demo_dataset(normalized_market)
+                    self.market_store.seed_demo_dataset(DEFAULT_MARKET_SCOPE)
                     final_status = "warning" if warning_messages else "success"
                     if warning_messages:
                         final_message = (
-                            f"{'；'.join(warning_messages)} 已回退到 {market_label(normalized_market)} 示例数据。"
+                            f"{'；'.join(warning_messages)} 已回退到 {market_label(DEFAULT_MARKET_SCOPE)} 示例数据。"
                         )
                     else:
-                        final_message = f"已刷新 {market_label(normalized_market)} 示例数据。"
+                        final_message = f"已刷新 {market_label(DEFAULT_MARKET_SCOPE)} 示例数据。"
                 break
             warning_messages.append(result.message)
         else:
-            self.market_store.seed_demo_dataset(normalized_market)
+            self.market_store.seed_demo_dataset(DEFAULT_MARKET_SCOPE)
             final_status = "warning"
             final_message = (
                 "；".join(warning_messages)
                 if warning_messages
-                else f"所有数据源均不可用，已回退到 {market_label(normalized_market)} 示例数据。"
+                else f"所有数据源均不可用，已回退到 {market_label(DEFAULT_MARKET_SCOPE)} 示例数据。"
             )
 
         task.status = final_status
         task.last_run_at = now
-        market_schedule = self._schedule_map(normalized_market)
+        market_schedule = self._schedule_map(DEFAULT_MARKET_SCOPE)
         market_sync_hour, market_sync_minute = market_schedule["market-sync"]
         task.next_run_at = (
             self._next_occurrence(
@@ -200,12 +193,11 @@ class TaskService:
                 self.market_store,
                 generated_at=now,
                 source=source,
-                market=normalized_market,
             )
 
         for dependent_key in ("signal-rescore", "recommendation-publish"):
             dependent = self.db.query(SyncTaskRecord).filter_by(
-                task_key=scoped_key(normalized_market, dependent_key)
+                task_key=scoped_key(DEFAULT_MARKET_SCOPE, dependent_key)
             ).first()
             if dependent is None:
                 continue
@@ -222,7 +214,7 @@ class TaskService:
                 if self.settings.enable_task_scheduler
                 else None
             )
-            dependent.message = f"已基于最新 {market_label(normalized_market)} 市场数据刷新。"
+            dependent.message = f"已基于最新 {market_label(DEFAULT_MARKET_SCOPE)} 市场数据刷新。"
             dependent.source = source
             self.db.add(dependent)
 
@@ -303,12 +295,6 @@ class TaskService:
 
     @staticmethod
     def _market_offset_minutes(market: str = DEFAULT_MARKET_SCOPE) -> int:
-        settings = get_settings()
-        normalized_market = normalize_market_scope(market)
-        if normalized_market == "hk":
-            return settings.scheduler_hk_offset_minutes
-        if normalized_market == "us":
-            return settings.scheduler_us_offset_minutes
         return 0
 
     @staticmethod

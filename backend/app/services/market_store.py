@@ -10,7 +10,6 @@ import pandas as pd
 from app.core.market_scope import (
     DEFAULT_MARKET_SCOPE,
     SUPPORTED_MARKETS,
-    infer_market_from_symbol,
     normalize_market_scope,
 )
 from app.services.capital_flow_service import (
@@ -1551,11 +1550,6 @@ def _normalize_event_source(raw_source: object) -> str:
 
 
 def _configured_event_sources(market: str) -> list[str]:
-    normalized_market = normalize_market_scope(market)
-    if normalized_market == "hk":
-        return ["财报日历", "股息日历", "港股盈利预测"]
-    if normalized_market == "us":
-        return ["财报日历", "股息日历"]
     return ["公告", "业绩预告"]
 
 

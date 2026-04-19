@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_market_scope
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.schemas.market import (
@@ -27,18 +26,16 @@ def portfolio_overview(
     status: PortfolioPositionStatus | None = Query(default=None),
     db: Session = Depends(get_db),
     market_store: MarketDataStore = Depends(get_market_store),
-    market: str = Depends(get_market_scope),
 ) -> PortfolioOverview:
-    payload = PortfolioService.build_overview(db, market_store, market=market, status=status)
+    payload = PortfolioService.build_overview(db, market_store, status=status)
     return PortfolioOverview.model_validate(payload)
 
 
 @router.get("/profile", response_model=PortfolioProfileConfig)
 def portfolio_profile(
     db: Session = Depends(get_db),
-    market: str = Depends(get_market_scope),
 ) -> PortfolioProfileConfig:
-    profile = PortfolioService.read_profile(db, market)
+    profile = PortfolioService.read_profile(db)
     return PortfolioProfileConfig.model_validate(profile)
 
 
@@ -46,9 +43,8 @@ def portfolio_profile(
 def update_portfolio_profile(
     payload: PortfolioProfileConfig,
     db: Session = Depends(get_db),
-    market: str = Depends(get_market_scope),
 ) -> PortfolioProfileConfig:
-    profile = PortfolioService.update_profile(db, payload, market)
+    profile = PortfolioService.update_profile(db, payload)
     return PortfolioProfileConfig.model_validate(profile)
 
 

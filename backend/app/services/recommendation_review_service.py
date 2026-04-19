@@ -7,7 +7,7 @@ from datetime import date
 import duckdb
 from sqlalchemy.orm import Session
 
-from app.core.market_scope import DEFAULT_MARKET_SCOPE, infer_market_from_symbol, normalize_market_scope
+from app.core.market_scope import is_a_share_symbol
 from app.models.recommendation import RecommendationJournal
 from app.services.market_store import MarketDataStore
 
@@ -21,16 +21,14 @@ class RecommendationReviewService:
         db: Session,
         market_store: MarketDataStore,
         *,
-        market: str = DEFAULT_MARKET_SCOPE,
         limit: int = 120,
     ) -> dict[str, object]:
-        normalized_market = normalize_market_scope(market)
         journal_rows = (
             db.query(RecommendationJournal)
             .order_by(RecommendationJournal.generated_at.desc(), RecommendationJournal.id.desc())
             .all()
         )
-        journal_rows = [row for row in journal_rows if infer_market_from_symbol(row.symbol) == normalized_market][:limit]
+        journal_rows = [row for row in journal_rows if is_a_share_symbol(row.symbol)][:limit]
         if not journal_rows:
             return {
                 "total_samples": 0,

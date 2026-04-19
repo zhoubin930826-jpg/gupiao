@@ -5,11 +5,9 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { addToWatchlist, listStocks, removeFromWatchlist } from '@/api/market'
 import PageHeader from '@/components/PageHeader.vue'
-import { useWorkspaceStore } from '@/stores/workspace'
 import type { StockItem } from '@/types/market'
 
 const router = useRouter()
-const workspaceStore = useWorkspaceStore()
 const loading = ref(false)
 const togglingSymbol = ref<string | null>(null)
 const total = ref(0)
@@ -20,28 +18,12 @@ const filters = reactive({
   board: '全部',
 })
 
-const boardOptions = computed(() => {
-  if (workspaceStore.selectedMarket === 'hk') {
-    return [
-      { label: '全部板块', value: '全部' },
-      { label: '港股主板', value: '港股主板' },
-    ]
-  }
-  if (workspaceStore.selectedMarket === 'us') {
-    return [
-      { label: '全部交易所', value: '全部' },
-      { label: 'NASDAQ', value: 'NASDAQ' },
-      { label: 'NYSE', value: 'NYSE' },
-      { label: 'AMEX', value: 'AMEX' },
-    ]
-  }
-  return [
-    { label: '全部板块', value: '全部' },
-    { label: '主板', value: '主板' },
-    { label: '创业板', value: '创业板' },
-    { label: '科创板', value: '科创板' },
-  ]
-})
+const boardOptions = computed(() => [
+  { label: '全部板块', value: '全部' },
+  { label: '主板', value: '主板' },
+  { label: '创业板', value: '创业板' },
+  { label: '科创板', value: '科创板' },
+])
 
 async function loadStocks() {
   loading.value = true

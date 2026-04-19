@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_market_scope
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.schemas.market import (
@@ -25,9 +24,8 @@ def list_trade_plans(
     status: TradePlanStatus | None = Query(default=None),
     db: Session = Depends(get_db),
     market_store: MarketDataStore = Depends(get_market_store),
-    market: str = Depends(get_market_scope),
 ) -> list[TradePlanItem]:
-    rows = TradePlanService.list_items(db, market_store, market=market, status=status)
+    rows = TradePlanService.list_items(db, market_store, status=status)
     return [TradePlanItem.model_validate(row) for row in rows]
 
 

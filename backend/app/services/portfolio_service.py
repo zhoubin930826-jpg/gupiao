@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.market_scope import DEFAULT_MARKET_SCOPE, infer_market_from_symbol, normalize_market_scope, normalize_symbol
+from app.core.market_scope import DEFAULT_MARKET_SCOPE, is_a_share_symbol, normalize_symbol
 from app.models.portfolio import PortfolioPosition, PortfolioProfile
 from app.schemas.market import (
     PortfolioPositionCreateRequest,
@@ -18,24 +18,23 @@ from app.services.market_store import MarketDataStore
 
 class PortfolioService:
     @staticmethod
-    def get_profile(db: Session, market: str = DEFAULT_MARKET_SCOPE) -> PortfolioProfile:
-        profile = db.query(PortfolioProfile).filter_by(market=normalize_market_scope(market)).first()
+    def get_profile(db: Session) -> PortfolioProfile:
+        profile = db.query(PortfolioProfile).filter_by(market=DEFAULT_MARKET_SCOPE).first()
         if profile is None:
             raise RuntimeError("Portfolio profile was not initialized.")
         return profile
 
     @classmethod
-    def read_profile(cls, db: Session, market: str = DEFAULT_MARKET_SCOPE) -> PortfolioProfile:
-        return cls.get_profile(db, market)
+    def read_profile(cls, db: Session) -> PortfolioProfile:
+        return cls.get_profile(db)
 
     @classmethod
     def update_profile(
         cls,
         db: Session,
         payload: PortfolioProfileConfig,
-        market: str = DEFAULT_MARKET_SCOPE,
     ) -> PortfolioProfile:
-        profile = cls.get_profile(db, market)
+        profile = cls.get_profile(db)
         for field, value in payload.model_dump().items():
             setattr(profile, field, value)
         db.add(profile)
@@ -49,18 +48,16 @@ class PortfolioService:
         db: Session,
         market_store: MarketDataStore,
         *,
-        market: str = DEFAULT_MARKET_SCOPE,
         status: str | None = None,
     ) -> dict[str, object]:
-        normalized_market = normalize_market_scope(market)
-        profile = cls.read_profile(db, normalized_market)
+        profile = cls.read_profile(db)
         query = db.query(PortfolioPosition)
         if status:
             query = query.filter(PortfolioPosition.status == status)
         rows = [
             row
             for row in query.order_by(PortfolioPosition.updated_at.desc(), PortfolioPosition.id.desc()).all()
-            if infer_market_from_symbol(row.symbol) == normalized_market
+            if is_a_share_symbol(row.symbol)
         ]
         snapshot_map = market_store.get_snapshot_briefs([row.symbol for row in rows])
 

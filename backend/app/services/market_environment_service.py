@@ -4,7 +4,7 @@ from typing import Any
 
 import pandas as pd
 
-from app.core.market_scope import DEFAULT_MARKET_SCOPE, market_label, normalize_market_scope
+from app.core.market_scope import DEFAULT_MARKET_SCOPE, market_label
 
 CN_BENCHMARKS: tuple[tuple[str, str], ...] = (
     ("sh000001", "上证指数"),
@@ -19,10 +19,6 @@ def collect_market_benchmark_records(
     ak: Any,
     market: str = DEFAULT_MARKET_SCOPE,
 ) -> list[dict[str, object]]:
-    normalized_market = normalize_market_scope(market)
-    if normalized_market != "cn":
-        return []
-
     records: list[dict[str, object]] = []
     # `stock_zh_index_daily` 底层会触发 py_mini_racer；并发拉取时会出现原生崩溃，
     # 这里宁可慢一点，也要保证同步过程稳定。
@@ -43,50 +39,35 @@ def build_market_breadth_from_spot_frame(
     spot_frame: pd.DataFrame,
     market: str = DEFAULT_MARKET_SCOPE,
 ) -> dict[str, object]:
-    normalized_market = normalize_market_scope(market)
     frame = _normalize_spot_frame(spot_frame)
-    return _build_market_breadth(frame, normalized_market)
+    return _build_market_breadth(frame)
 
 
 def build_market_breadth_from_records(
     records: list[dict[str, object]],
     market: str = DEFAULT_MARKET_SCOPE,
 ) -> dict[str, object]:
-    normalized_market = normalize_market_scope(market)
     frame = pd.DataFrame(records)
-    return _build_market_breadth(frame, normalized_market)
+    return _build_market_breadth(frame)
 
 
 def build_sample_benchmark_records(
     records: list[dict[str, object]],
     market: str = DEFAULT_MARKET_SCOPE,
 ) -> list[dict[str, object]]:
-    normalized_market = normalize_market_scope(market)
-    presets: dict[str, list[tuple[str, str, float]]] = {
-        "cn": [
-            ("sh000001", "上证指数", 3300.0),
-            ("sz399001", "深证成指", 10500.0),
-            ("sz399006", "创业板指", 2100.0),
-            ("sh000300", "沪深300", 3900.0),
-        ],
-        "hk": [
-            ("HSI", "恒生指数", 18000.0),
-            ("HSCEI", "国企指数", 6200.0),
-            ("HSTECH", "恒生科技指数", 4200.0),
-        ],
-        "us": [
-            ("SPX", "标普500", 5200.0),
-            ("IXIC", "纳斯达克综合指数", 16500.0),
-            ("DJI", "道琼斯工业指数", 38500.0),
-        ],
-    }
     frame = pd.DataFrame(records)
     avg_change = float(frame["change_pct"].mean()) if not frame.empty and "change_pct" in frame.columns else 0.0
     avg_score = float(frame["score"].mean()) if not frame.empty and "score" in frame.columns else 60.0
     ret20 = round((avg_score - 60) * 0.35, 2)
 
     rows: list[dict[str, object]] = []
-    for code, name, base_value in presets.get(normalized_market, []):
+    for code, name in CN_BENCHMARKS:
+        base_value = {
+            "sh000001": 3300.0,
+            "sz399001": 10500.0,
+            "sz399006": 2100.0,
+            "sh000300": 3900.0,
+        }[code]
         latest_price = round(base_value * (1 + avg_change / 120), 2)
         rows.append(
             {
@@ -154,8 +135,8 @@ def _normalize_spot_frame(spot_frame: pd.DataFrame) -> pd.DataFrame:
     return frame[frame["latest_price"].fillna(0) > 0].copy()
 
 
-def _build_market_breadth(frame: pd.DataFrame, market: str) -> dict[str, object]:
-    market_name = market_label(market)
+def _build_market_breadth(frame: pd.DataFrame) -> dict[str, object]:
+    market_name = market_label(DEFAULT_MARKET_SCOPE)
     if frame.empty:
         return {
             "scope_label": f"{market_name} 活跃样本宽度",
@@ -181,16 +162,15 @@ def _build_market_breadth(frame: pd.DataFrame, market: str) -> dict[str, object]
     avg_change = round(float(frame["change_pct"].fillna(0).mean()), 2)
     avg_turnover = round(float(frame["turnover_ratio"].fillna(0).mean()), 2)
 
-    strong_threshold = 3.0 if market == "cn" else 2.0
-    strong_count = int((frame["change_pct"] >= strong_threshold).sum())
+    strong_count = int((frame["change_pct"] >= 3.0).sum())
     strong_ratio = round(strong_count / total * 100, 2) if total else 0.0
 
     industry_share = frame["industry"].value_counts(normalize=True)
     top_industry = str(industry_share.index[0]) if not industry_share.empty else None
     top_two_share = round(float(industry_share.head(2).sum()) * 100, 2) if not industry_share.empty else 0.0
 
-    limit_up_like = int((frame["change_pct"] >= 9.8).sum()) if market == "cn" else None
-    limit_down_like = int((frame["change_pct"] <= -9.8).sum()) if market == "cn" else None
+    limit_up_like = int((frame["change_pct"] >= 9.8).sum())
+    limit_down_like = int((frame["change_pct"] <= -9.8).sum())
 
     if advance_ratio >= 58 and strong_ratio >= 18:
         summary = "活跃样本里上涨扩散较好，说明今天更像可操作环境，但仍要看主线是否过于拥挤。"

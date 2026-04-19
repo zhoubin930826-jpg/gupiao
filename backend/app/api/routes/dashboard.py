@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends
 
-from app.api.dependencies import get_market_scope
 from app.core.config import Settings, get_settings
 from app.schemas.market import DashboardSummary
 from app.services.market_store import MarketDataStore
@@ -15,6 +14,5 @@ def get_market_store(settings: Settings = Depends(get_settings)) -> MarketDataSt
 @router.get("/summary", response_model=DashboardSummary)
 def dashboard_summary(
     market_store: MarketDataStore = Depends(get_market_store),
-    market: str = Depends(get_market_scope),
 ) -> DashboardSummary:
-    return DashboardSummary.model_validate(market_store.get_dashboard_summary(market))
+    return DashboardSummary.model_validate(market_store.get_dashboard_summary())

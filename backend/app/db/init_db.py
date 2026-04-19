@@ -6,7 +6,7 @@ from sqlalchemy import inspect, text
 
 from app.models.data_source import DataSourceStatus
 from app.core.config import get_settings
-from app.core.market_scope import SUPPORTED_MARKETS, market_label, scoped_key
+from app.core.market_scope import DEFAULT_MARKET_SCOPE, SUPPORTED_MARKETS, market_label, scoped_key
 from app.db.session import engine
 from app.models.alert import AlertEvent
 from app.models.base import Base
@@ -35,6 +35,10 @@ def init_db(session: Session) -> None:
     if "market" not in portfolio_columns:
         session.execute(text("alter table portfolio_profiles add column market varchar(8) default 'cn'"))
     session.execute(text("update portfolio_profiles set market = 'cn' where market is null or market = ''"))
+    session.execute(text("delete from strategy_profiles where market != 'cn'"))
+    session.execute(text("delete from portfolio_profiles where market != 'cn'"))
+    session.execute(text("delete from sync_tasks where task_key not like 'cn:%'"))
+    session.execute(text("delete from data_source_statuses where provider_key not like 'cn:%'"))
 
     for market in SUPPORTED_MARKETS:
         if session.query(StrategyProfile).filter_by(market=market).first() is None:
@@ -54,17 +58,12 @@ def init_db(session: Session) -> None:
             )
 
         if session.query(PortfolioProfile).filter_by(market=market).first() is None:
-            benchmark = {
-                "cn": "沪深300",
-                "hk": "恒生指数",
-                "us": "标普500",
-            }[market]
             session.add(
                 PortfolioProfile(
                     market=market,
                     name=f"{market_label(market)}账户",
                     initial_capital=500000,
-                    benchmark=benchmark,
+                    benchmark="沪深300",
                     notes=f"用于估算 {market_label(market)} 组合资产、仓位利用率和持仓盈亏。",
                 )
             )
@@ -130,5 +129,4 @@ def init_db(session: Session) -> None:
     session.query(WatchlistEntry).count()
 
     session.commit()
-    for market in SUPPORTED_MARKETS:
-        DataSourceService.sync_catalog(session, market)
+    DataSourceService.sync_catalog(session, DEFAULT_MARKET_SCOPE)

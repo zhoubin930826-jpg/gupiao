@@ -24,28 +24,15 @@ def test_stocks_list(client: TestClient) -> None:
     payload = response.json()
     assert payload["total"] > 0
     assert len(payload["rows"]) > 0
+    assert all(str(row["symbol"]).isdigit() and len(str(row["symbol"])) == 6 for row in payload["rows"])
 
 
-def test_multi_market_switching(client: TestClient) -> None:
-    hk_response = client.get("/api/stocks", params={"market": "hk", "page_size": 5})
-    assert hk_response.status_code == 200
-    hk_payload = hk_response.json()
-    assert hk_payload["total"] > 0
-    assert hk_payload["rows"][0]["symbol"].endswith(".HK")
-
-    us_response = client.get("/api/stocks", params={"market": "us", "page_size": 5})
-    assert us_response.status_code == 200
-    us_payload = us_response.json()
-    assert us_payload["total"] > 0
-    assert us_payload["rows"][0]["symbol"].isupper()
-
-    hk_tasks = client.get("/api/tasks", params={"market": "hk"}).json()
-    assert any(str(item["schedule"]).startswith("每日") for item in hk_tasks)
-    assert any(item["next_run_at"] is not None for item in hk_tasks)
-
-    us_tasks = client.get("/api/tasks", params={"market": "us"}).json()
-    assert any(str(item["schedule"]).startswith("每日") for item in us_tasks)
-    assert any(item["next_run_at"] is not None for item in us_tasks)
+def test_market_query_does_not_switch_away_from_cn(client: TestClient) -> None:
+    response = client.get("/api/stocks", params={"market": "ignored", "page_size": 5})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] > 0
+    assert all(str(row["symbol"]).isdigit() and len(str(row["symbol"])) == 6 for row in payload["rows"])
 
 
 def test_stock_detail_contains_fundamental_snapshot(client: TestClient) -> None:
@@ -119,7 +106,7 @@ def test_recommendation_review_exists(client: TestClient) -> None:
 
 
 def test_dashboard_contains_market_context(client: TestClient) -> None:
-    response = client.get("/api/dashboard/summary", params={"market": "cn"})
+    response = client.get("/api/dashboard/summary")
     assert response.status_code == 200
     payload = response.json()
     assert payload["market_context"]["regime"] in {"risk_on", "balanced", "risk_off"}
@@ -155,7 +142,12 @@ def test_tasks_endpoint(client: TestClient) -> None:
     response = client.get("/api/tasks")
     assert response.status_code == 200
     payload = response.json()
-    assert len(payload) >= 1
+    assert len(payload) == 3
+    assert {item["task_key"] for item in payload} == {
+        "market-sync",
+        "signal-rescore",
+        "recommendation-publish",
+    }
 
 
 def test_data_source_overview(client: TestClient) -> None:

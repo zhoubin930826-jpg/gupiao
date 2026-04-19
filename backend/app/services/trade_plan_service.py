@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.market_scope import DEFAULT_MARKET_SCOPE, infer_market_from_symbol, normalize_market_scope, normalize_symbol
+from app.core.market_scope import is_a_share_symbol, normalize_symbol
 from app.models.trade_plan import TradePlanEntry
 from app.schemas.market import TradePlanCreateRequest, TradePlanUpdateRequest
 from app.services.market_store import MarketDataStore
@@ -19,17 +19,15 @@ class TradePlanService:
         db: Session,
         market_store: MarketDataStore,
         *,
-        market: str = DEFAULT_MARKET_SCOPE,
         status: str | None = None,
     ) -> list[dict[str, object]]:
-        normalized_market = normalize_market_scope(market)
         query = db.query(TradePlanEntry)
         if status:
             query = query.filter(TradePlanEntry.status == status)
         rows = [
             row
             for row in query.order_by(TradePlanEntry.updated_at.desc(), TradePlanEntry.id.desc()).all()
-            if infer_market_from_symbol(row.symbol) == normalized_market
+            if is_a_share_symbol(row.symbol)
         ]
         snapshot_map = market_store.get_snapshot_briefs([row.symbol for row in rows])
         return [cls._serialize(row, snapshot_map.get(row.symbol)) for row in rows]

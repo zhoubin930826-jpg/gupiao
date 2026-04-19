@@ -1,18 +1,23 @@
 from app.services.market_store import MarketDataStore
-from app.services.sample_market import build_demo_snapshot_records
 
 
-def test_refresh_snapshot_records_handles_empty_lhb_rows_for_hk(tmp_path) -> None:
+def test_initialize_seeds_cn_dataset_only(tmp_path) -> None:
     db_path = tmp_path / "market.duckdb"
     store = MarketDataStore(str(db_path))
+    store.initialize()
 
-    store.refresh_snapshot_records(
-        build_demo_snapshot_records("hk"),
-        source="sample",
-        market="hk",
-        lhb_rows=[],
-    )
-
-    summary = store.get_dashboard_summary("hk")
-    assert summary["market_capital_flow"]["status"] == "placeholder"
+    summary = store.get_dashboard_summary()
     assert summary["headline"]
+    recommendations = store.get_recommendations()
+    assert recommendations
+    assert all(str(item["symbol"]).isdigit() and len(str(item["symbol"])) == 6 for item in recommendations)
+
+
+def test_event_sync_overview_uses_cn_sources_only(tmp_path) -> None:
+    db_path = tmp_path / "market.duckdb"
+    store = MarketDataStore(str(db_path))
+    store.initialize()
+
+    overview = store.get_event_sync_overview()
+
+    assert overview["configured_sources"] == ["公告", "业绩预告"]
