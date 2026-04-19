@@ -8,6 +8,7 @@ from app.db.session import get_db
 from app.schemas.market import StockDetail, StockListResponse, StrategyConfig
 from app.services.market_store import MarketDataStore
 from app.services.recommendation_diagnosis_service import RecommendationDiagnosisService
+from app.services.recommendation_trust_service import build_recommendation_trust
 from app.services.strategy_service import StrategyService
 from app.services.watchlist_service import WatchlistService
 
@@ -50,5 +51,11 @@ def stock_detail(
         detail=payload,
         ranking=market_store.get_recommendation_context(symbol),
         strategy=StrategyConfig.model_validate(StrategyService.read_config(db)),
+    )
+    payload["recommendation_trust"] = build_recommendation_trust(
+        source=market_store.current_source(),
+        snapshot_updated_at=str(payload.pop("snapshot_updated_at") or "").replace("T", " "),
+        signal_breakdown=list(payload.get("signal_breakdown", [])),
+        risk_notes=[str(item) for item in payload.get("risk_notes", [])],
     )
     return StockDetail.model_validate(payload)
