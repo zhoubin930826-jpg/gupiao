@@ -17,21 +17,57 @@ const loading = ref(false)
 const togglingSymbol = ref<string | null>(null)
 const rows = ref<RecommendationItem[]>([])
 const journal = ref<RecommendationJournalItem[]>([])
+const hasLiveJournal = computed(() => journal.value.some((item) => item.data_mode === 'live'))
+const hasDemoJournal = computed(() => journal.value.some((item) => item.data_mode === 'demo'))
+const journalStatsMode = computed<'demo' | 'live' | null>(() => {
+  if (!journal.value.length) {
+    return null
+  }
+  return hasLiveJournal.value ? 'live' : 'demo'
+})
+const journalStatsRows = computed(() =>
+  journalStatsMode.value === null
+    ? []
+    : journal.value.filter((item) => item.data_mode === journalStatsMode.value),
+)
+const maturedRows = computed(() =>
+  journalStatsRows.value.filter((item) => item.is_matured_for_expected_window),
+)
+const trackingRows = computed(() =>
+  journalStatsRows.value.filter((item) => !item.is_matured_for_expected_window),
+)
+const journalTrustAlert = computed(() => {
+  if (!journal.value.length || !hasDemoJournal.value) {
+    return null
+  }
+  if (hasLiveJournal.value) {
+    return {
+      title: '当前统计仅基于真实记录',
+      type: 'success' as const,
+      message: '这些示例记录只用于流程演示，不计入上方三项统计。',
+    }
+  }
+  return {
+    title: '当前推荐记录来自示例数据',
+    type: 'warning' as const,
+    message: '这些记录适合验证流程和页面，不适合直接判断策略有没有真实优势。',
+  }
+})
 
-const reviewStats = computed(() => {
-  const withReturn = journal.value.filter((item) => item.current_return !== null)
-  const hitRate = withReturn.length
-    ? (withReturn.filter((item) => (item.current_return ?? 0) > 0).length / withReturn.length) * 100
+const trackingSnapshotStats = computed(() => {
+  const maturedWithReturn = maturedRows.value.filter((item) => item.current_return !== null)
+  const maturedHitRate = maturedWithReturn.length
+    ? (maturedWithReturn.filter((item) => (item.current_return ?? 0) > 0).length / maturedWithReturn.length) * 100
     : null
-  const averageReturn = withReturn.length
-    ? withReturn.reduce((sum, item) => sum + (item.current_return ?? 0), 0) / withReturn.length
+  const maturedAverageReturn = maturedWithReturn.length
+    ? maturedWithReturn.reduce((sum, item) => sum + (item.current_return ?? 0), 0) / maturedWithReturn.length
     : null
-  const bestTrade = withReturn.length
-    ? Math.max(...withReturn.map((item) => item.current_return ?? 0))
+  const bestTrade = maturedWithReturn.length
+    ? Math.max(...maturedWithReturn.map((item) => item.current_return ?? 0))
     : null
   return {
-    hitRate,
-    averageReturn,
+    maturedHitRate,
+    maturedAverageReturn,
     bestTrade,
   }
 })
@@ -151,31 +187,48 @@ onMounted(() => {
       </template>
     </PageHeader>
 
+    <el-alert
+      v-if="journalTrustAlert"
+      :title="journalTrustAlert.title"
+      :type="journalTrustAlert.type"
+      :closable="false"
+    >
+      <template #default>
+        {{ journalTrustAlert.message }}
+      </template>
+    </el-alert>
+
+    <el-alert title="运行中跟踪快照" type="info" :closable="false">
+      <template #default>
+        顶部卡片只反映当前推荐日志的跟踪状态，不替代复盘页的正式验证结论。
+      </template>
+    </el-alert>
+
     <section class="review-grid">
       <el-card class="panel-card">
-        <span class="review-label">最近命中率</span>
+        <span class="review-label">已成熟样本</span>
         <strong class="review-value">
-          {{ reviewStats.hitRate === null ? '暂无' : `${reviewStats.hitRate.toFixed(1)}%` }}
+          {{ maturedRows.length }}
         </strong>
-        <p>按当前价格回看最近推荐记录中，正收益占比是多少。</p>
+        <p>已经走完预期持有窗口的推荐数。</p>
       </el-card>
       <el-card class="panel-card">
-        <span class="review-label">平均当前收益</span>
+        <span class="review-label">成熟样本命中率</span>
         <strong class="review-value">
           {{
-            reviewStats.averageReturn === null
+            trackingSnapshotStats.maturedHitRate === null
               ? '暂无'
-              : `${reviewStats.averageReturn.toFixed(2)}%`
+              : `${trackingSnapshotStats.maturedHitRate.toFixed(1)}%`
           }}
         </strong>
-        <p>帮助你快速看系统最近输出是偏有效还是偏失真。</p>
+        <p>只统计已成熟样本，避免把跟踪中样本误解为正式结论。</p>
       </el-card>
       <el-card class="panel-card">
-        <span class="review-label">最佳记录</span>
+        <span class="review-label">跟踪中样本</span>
         <strong class="review-value">
-          {{ reviewStats.bestTrade === null ? '暂无' : `${reviewStats.bestTrade.toFixed(2)}%` }}
+          {{ trackingRows.length }}
         </strong>
-        <p>方便观察系统最近有没有抓到特别强的机会。</p>
+        <p>这些样本仍在运行中，当前收益只适合作为观察快照。</p>
       </el-card>
     </section>
 
@@ -204,6 +257,21 @@ onMounted(() => {
         </div>
 
         <p class="thesis">{{ item.thesis }}</p>
+
+        <div class="driver-block">
+          <div class="driver-head">
+            <span class="driver-title">最强证据</span>
+            <el-tag size="small" effect="plain">
+              {{ item.data_mode === 'live' ? '真实快照' : '示例快照' }}
+            </el-tag>
+          </div>
+          <ul class="copy-list">
+            <li v-for="signal in item.strongest_signals" :key="`${item.symbol}-${signal.dimension}`">
+              {{ signal.dimension }} {{ signal.score }} 分，{{ signal.takeaway }}
+            </li>
+          </ul>
+          <p class="trust-copy">{{ item.confidence_notice }}</p>
+        </div>
 
         <div v-if="item.move_summary" class="driver-block">
           <div class="driver-head">
@@ -268,7 +336,7 @@ onMounted(() => {
 
         <div class="risk-block">
           <span>风险提醒</span>
-          <p>{{ item.risk }}</p>
+          <p>{{ item.primary_risk }}</p>
         </div>
 
         <div class="card-actions">
@@ -304,6 +372,11 @@ onMounted(() => {
             <span :class="row.current_return !== null && row.current_return >= 0 ? 'stat-positive' : 'stat-negative'">
               {{ formatPercent(row.current_return) }}
             </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="跟踪状态" width="120">
+          <template #default="{ row }">
+            {{ row.is_matured_for_expected_window ? '已成熟' : '跟踪中' }}
           </template>
         </el-table-column>
         <el-table-column prop="entry_window" label="关注窗口" width="160" />
@@ -450,6 +523,19 @@ h3 {
   margin: 0;
   color: var(--text-soft);
   line-height: 1.65;
+}
+
+.copy-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+  color: var(--text-soft);
+  line-height: 1.65;
+}
+
+.trust-copy {
+  color: var(--text-soft);
 }
 
 .risk-block p {
