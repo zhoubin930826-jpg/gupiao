@@ -123,6 +123,21 @@ export interface SignalBreakdown {
   takeaway: string
 }
 
+export interface RecommendationConfidenceSignal {
+  dimension: string
+  score: number
+  takeaway: string
+}
+
+export interface RecommendationTrustSummary {
+  data_mode: 'demo' | 'live'
+  snapshot_updated_at: string
+  strongest_signals: RecommendationConfidenceSignal[]
+  primary_risk: string
+  confidence_score: number
+  confidence_notice: string
+}
+
 export type MoveBias = 'bullish' | 'mixed' | 'cautious'
 
 export interface MoveDriver {
@@ -217,6 +232,7 @@ export interface StockDetail extends StockItem {
   event_analysis: EventAnalysis | null
   capital_flow_analysis: CapitalFlowAnalysis | null
   recommendation_diagnosis: RecommendationDiagnosis | null
+  recommendation_trust: RecommendationTrustSummary | null
 }
 
 export interface RecommendationItem {
@@ -235,6 +251,12 @@ export interface RecommendationItem {
   move_summary: string | null
   event_tone: EventTone | null
   event_summary: string | null
+  data_mode: 'demo' | 'live'
+  snapshot_updated_at: string
+  strongest_signals: RecommendationConfidenceSignal[]
+  primary_risk: string
+  confidence_score: number
+  confidence_notice: string
   in_watchlist: boolean
 }
 
@@ -249,10 +271,14 @@ export interface RecommendationJournalItem {
   thesis: string
   risk: string
   source: string
+  data_mode: 'demo' | 'live'
   tags: string[]
   price_at_publish: number
   current_price: number | null
   current_return: number | null
+  days_since_publish: number
+  tracking_status: 'tracking' | 'matured'
+  is_matured_for_expected_window: boolean
 }
 
 export interface RecommendationReviewWindowMetric {
@@ -283,6 +309,7 @@ export interface RecommendationReviewSample {
   name: string
   score: number
   source: string
+  data_mode: 'demo' | 'live'
   entry_window: string
   expected_holding_days: number
   thesis: string
@@ -295,8 +322,26 @@ export interface RecommendationReviewSample {
   expected_return: number | null
 }
 
+export interface RecommendationModeBreakdown {
+  mode: 'demo' | 'live'
+  sample_size: number
+}
+
+export interface RecommendationReviewMaturityMetric {
+  window_days: number
+  total_samples: number
+  matured_samples: number
+  immature_samples: number
+}
+
 export interface RecommendationReviewResponse {
   total_samples: number
+  evaluation_mode: 'demo' | 'live'
+  evaluation_notice: string
+  trust_level: 'low' | 'medium' | 'high'
+  trust_reasons: string[]
+  mode_breakdown: RecommendationModeBreakdown[]
+  maturity_breakdown: RecommendationReviewMaturityMetric[]
   window_metrics: RecommendationReviewWindowMetric[]
   recent_runs: RecommendationReviewRun[]
   top_hits: RecommendationReviewSample[]
