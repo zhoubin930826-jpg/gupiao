@@ -45,6 +45,21 @@ class MarketPulsePoint(BaseModel):
     turnover: float
 
 
+class RecommendationConfidenceSignal(BaseModel):
+    dimension: str
+    score: int
+    takeaway: str
+
+
+class RecommendationTrustSummary(BaseModel):
+    data_mode: Literal["demo", "live"]
+    snapshot_updated_at: str
+    strongest_signals: list[RecommendationConfidenceSignal]
+    primary_risk: str
+    confidence_score: int
+    confidence_notice: str
+
+
 class RecommendationItem(BaseModel):
     symbol: str
     name: str
@@ -61,6 +76,12 @@ class RecommendationItem(BaseModel):
     move_summary: str | None = None
     event_tone: EventTone | None = None
     event_summary: str | None = None
+    data_mode: Literal["demo", "live"]
+    snapshot_updated_at: str
+    strongest_signals: list[RecommendationConfidenceSignal]
+    primary_risk: str
+    confidence_score: int
+    confidence_notice: str
     in_watchlist: bool = False
 
 
@@ -75,10 +96,14 @@ class RecommendationJournalItem(BaseModel):
     thesis: str
     risk: str
     source: str
+    data_mode: Literal["demo", "live"]
     tags: list[str]
     price_at_publish: float
     current_price: float | None = None
     current_return: float | None = None
+    days_since_publish: int
+    tracking_status: Literal["tracking", "matured"]
+    is_matured_for_expected_window: bool
 
 
 class RecommendationReviewWindowMetric(BaseModel):
@@ -109,6 +134,7 @@ class RecommendationReviewSample(BaseModel):
     name: str
     score: int
     source: str
+    data_mode: Literal["demo", "live"]
     entry_window: str
     expected_holding_days: int
     thesis: str
@@ -121,8 +147,26 @@ class RecommendationReviewSample(BaseModel):
     expected_return: float | None = None
 
 
+class RecommendationModeBreakdown(BaseModel):
+    mode: Literal["demo", "live"]
+    sample_size: int
+
+
+class RecommendationReviewMaturityMetric(BaseModel):
+    window_days: int
+    total_samples: int
+    matured_samples: int
+    immature_samples: int
+
+
 class RecommendationReviewResponse(BaseModel):
     total_samples: int
+    evaluation_mode: Literal["demo", "live"]
+    evaluation_notice: str
+    trust_level: Literal["low", "medium", "high"]
+    trust_reasons: list[str]
+    mode_breakdown: list[RecommendationModeBreakdown]
+    maturity_breakdown: list[RecommendationReviewMaturityMetric]
     window_metrics: list[RecommendationReviewWindowMetric]
     recent_runs: list[RecommendationReviewRun]
     top_hits: list[RecommendationReviewSample]
@@ -314,6 +358,7 @@ class StockDetail(StockItem):
     event_analysis: EventAnalysis | None = None
     capital_flow_analysis: CapitalFlowAnalysis | None = None
     recommendation_diagnosis: RecommendationDiagnosis | None = None
+    recommendation_trust: RecommendationTrustSummary | None = None
 
 
 class StrategyConfig(BaseModel):
