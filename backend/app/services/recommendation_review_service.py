@@ -190,7 +190,7 @@ class RecommendationReviewService:
     def _build_run_summaries(rows: list[dict[str, object]]) -> list[dict[str, object]]:
         buckets: dict[str, list[dict[str, object]]] = defaultdict(list)
         for row in rows:
-            buckets[str(row["run_key"])] .append(row)
+            buckets[str(row["run_key"])].append(row)
 
         summaries: list[dict[str, object]] = []
         for run_key, items in buckets.items():
@@ -301,7 +301,7 @@ class RecommendationReviewService:
         evaluation_mode: str,
         mode_breakdown: list[dict[str, object]],
     ) -> str:
-        counts = {str(item["mode"]): int(item["sample_size"] ) for item in mode_breakdown}
+        counts = {str(item["mode"]): int(item["sample_size"]) for item in mode_breakdown}
         if evaluation_mode == "live":
             demo_count = counts.get("demo", 0)
             if demo_count > 0:
