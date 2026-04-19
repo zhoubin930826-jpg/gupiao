@@ -57,6 +57,27 @@ const sampleRows = computed(() => review.value?.samples ?? [])
 const topHits = computed(() => review.value?.top_hits ?? [])
 const topMisses = computed(() => review.value?.top_misses ?? [])
 const recentRuns = computed(() => review.value?.recent_runs ?? [])
+const trustAlert = computed(() => {
+  if (!review.value) {
+    return null
+  }
+  if (review.value.trust_level === 'high') {
+    return {
+      title: '当前复盘可信度较高',
+      type: 'success' as const,
+    }
+  }
+  if (review.value.trust_level === 'medium') {
+    return {
+      title: '当前复盘可信度中等',
+      type: 'warning' as const,
+    }
+  }
+  return {
+    title: '当前复盘可信度偏低',
+    type: 'info' as const,
+  }
+})
 
 async function loadReview() {
   loading.value = true
@@ -115,6 +136,30 @@ onMounted(() => {
       </template>
     </PageHeader>
 
+    <el-alert
+      v-if="review"
+      :title="review.evaluation_mode === 'live' ? '当前复盘基于真实样本' : '当前复盘基于示例样本'"
+      :type="review.evaluation_mode === 'live' ? 'success' : 'warning'"
+      :closable="false"
+    >
+      <template #default>
+        {{ review.evaluation_notice }}
+      </template>
+    </el-alert>
+
+    <el-alert
+      v-if="review && trustAlert"
+      :title="trustAlert.title"
+      :type="trustAlert.type"
+      :closable="false"
+    >
+      <template #default>
+        <ul class="copy-list">
+          <li v-for="reason in review.trust_reasons" :key="reason">{{ reason }}</li>
+        </ul>
+      </template>
+    </el-alert>
+
     <section class="review-grid">
       <el-card v-for="card in reviewCards" :key="card.label" class="panel-card">
         <span class="review-label">{{ card.label }}</span>
@@ -134,6 +179,29 @@ onMounted(() => {
         <RecommendationReviewChart :runs="recentRuns" />
       </el-card>
 
+      <el-card class="panel-card">
+        <template #header>
+          <div class="card-head">
+            <span>窗口成熟度</span>
+            <span class="hint">先看样本有没有走完，再看收益统计</span>
+          </div>
+        </template>
+        <div class="window-list">
+          <div
+            v-for="item in review?.maturity_breakdown ?? []"
+            :key="`maturity-${item.window_days}`"
+            class="window-item"
+          >
+            <strong>{{ item.window_days }} 日成熟度</strong>
+            <p>总样本：{{ item.total_samples }}</p>
+            <p>已成熟：{{ item.matured_samples }}</p>
+            <p>跟踪中：{{ item.immature_samples }}</p>
+          </div>
+        </div>
+      </el-card>
+    </section>
+
+    <section class="section-grid review-layout">
       <el-card class="panel-card">
         <template #header>
           <div class="card-head">
@@ -298,7 +366,8 @@ onMounted(() => {
 }
 
 .window-list,
-.sample-list {
+.sample-list,
+.copy-list {
   display: grid;
   gap: 14px;
 }
@@ -315,6 +384,12 @@ onMounted(() => {
   margin: 8px 0 0;
   color: var(--text-soft);
   line-height: 1.6;
+}
+
+.copy-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-soft);
 }
 
 .sample-item {
